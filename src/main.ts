@@ -3,7 +3,6 @@ import "@fontsource-variable/fraunces/opsz-italic.css";
 import { api, onEvents, previewClock, type Color, type OgsStatus, type Speed, type View } from "./api";
 import { BoardView, type Look, type StoneStyle, type Texture } from "./board";
 import { setClock } from "./clock";
-import { checklistFor, hideChecklist, renderChecklist, type ChecklistSize } from "./checklist";
 import * as panel from "./review";
 import { click } from "./sound";
 
@@ -11,19 +10,15 @@ interface Settings extends Look {
   sound: boolean;
   matchSize: number;
   matchSpeed: Speed;
-  /** Whether the pre-move checklist shows, per board size. */
-  checklist: Record<ChecklistSize, boolean>;
 }
 
 const DEFAULTS: Settings = {
   texture: "kaya", stones: "shell", coords: false, sound: true, matchSize: 19, matchSpeed: "rapid",
-  checklist: { 9: true, 13: true, 19: true },
 };
 
 function loadSettings(): Settings {
   try {
-    const saved = JSON.parse(localStorage.getItem("tengen.settings") ?? "{}");
-    return { ...DEFAULTS, ...saved, checklist: { ...DEFAULTS.checklist, ...(saved.checklist ?? {}) } };
+    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem("tengen.settings") ?? "{}") };
   } catch {
     return { ...DEFAULTS };
   }
@@ -104,18 +99,6 @@ function show(v: View) {
     notify(`${v.toMove === "black" ? "White" : "Black"} passed`);
   }
   if (estimateOn && moved) refreshEstimate();
-  showChecklist();
-}
-
-/** The checklist sits under your clock: your side in a live game, else Black's. */
-function showChecklist() {
-  const v = view;
-  if (!v) return;
-  const size = checklistFor(v.size).size;
-  const m = mode(v);
-  if (!settings.checklist[size] || m === "finished" || m === "scoring") return hideChecklist();
-  const side = v.live?.myColor ?? "black";
-  renderChecklist($(`.player.${side}`), v.size, `${v.total}:${v.cursor}`);
 }
 
 // ---------- score estimate ----------
@@ -431,7 +414,6 @@ function syncLookDialog() {
     texture: (v) => v === settings.texture,
     stones: (v) => v === settings.stones,
     toggles: (v) => (v === "coords" ? settings.coords : settings.sound),
-    checklist: (v) => settings.checklist[Number(v) as ChecklistSize],
   };
   document.querySelectorAll<HTMLElement>("#look-dialog [data-setting]").forEach((group) => {
     group.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
@@ -450,11 +432,6 @@ document.querySelectorAll<HTMLElement>("#look-dialog [data-setting]").forEach((g
     if (kind === "stones") settings.stones = b.value as StoneStyle;
     if (kind === "toggles" && b.value === "coords") settings.coords = !settings.coords;
     if (kind === "toggles" && b.value === "sound") settings.sound = !settings.sound;
-    if (kind === "checklist") {
-      const size = Number(b.value) as ChecklistSize;
-      settings.checklist = { ...settings.checklist, [size]: !settings.checklist[size] };
-      showChecklist();
-    }
     saveSettings(settings);
     board.setLook(settings);
     syncLookDialog();
@@ -484,13 +461,6 @@ window.addEventListener("keydown", (e) => {
   if (!cmd && (e.key === "e" || e.key === "E")) return void actions.estimate();
   if (!cmd && (e.key === "r" || e.key === "R")) return void actions.review();
   if (!cmd && (e.key === "p" || e.key === "P")) return void actions.pass();
-  if (!cmd && (e.key === "c" || e.key === "C") && v) {
-    const size = checklistFor(v.size).size;
-    settings.checklist = { ...settings.checklist, [size]: !settings.checklist[size] };
-    saveSettings(settings);
-    notify(settings.checklist[size] ? `Checklist on for ${size} × ${size}` : `Checklist off for ${size} × ${size}`);
-    return void showChecklist();
-  }
   if (e.key === "Escape") {
     if (lineTurn !== null) {
       lineTurn = null;

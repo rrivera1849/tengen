@@ -74,7 +74,6 @@ Analyses and reviews are cached in Tengen's Application Support folder, so reope
 | P | Pass |
 | E | Show or hide the score estimate |
 | R | Review the game |
-| C | Show or hide the checklist for this board size |
 | Esc | Hide the estimate, a better line, or the review |
 | ← → | Step back or forward through the game |
 | Home, End | Jump to the start or the end |
