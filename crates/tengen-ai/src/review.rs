@@ -59,7 +59,10 @@ pub enum Side {
 /// The smallest loss worth a lesson, by the mover's rank.
 pub fn threshold(rank: Option<&str>) -> f64 {
     let r = rank.unwrap_or("").trim().to_ascii_lowercase();
-    let n: u32 = r.trim_end_matches(|c: char| c.is_alphabetic() || c == '?').parse().unwrap_or(0);
+    let n: u32 = r
+        .trim_end_matches(|c: char| c.is_alphabetic() || c == '?')
+        .parse()
+        .unwrap_or(0);
     if r.ends_with('d') || r.ends_with('p') {
         2.0
     } else if r.ends_with('k') && n >= 10 {
@@ -73,7 +76,9 @@ pub fn threshold(rank: Option<&str>) -> f64 {
 pub fn candidates(game: &Game, quick: &[TurnResult]) -> Vec<usize> {
     let mut out = Vec::new();
     for (i, (color, _)) in game.moves().iter().enumerate() {
-        let (Some(before), Some(after)) = (quick.get(i), quick.get(i + 1)) else { break };
+        let (Some(before), Some(after)) = (quick.get(i), quick.get(i + 1)) else {
+            break;
+        };
         let loss = loss_for(*color, before, after);
         let chance = chance_for(*color, before);
         let limit = threshold(rank_of(game, *color)) * 0.8; // quick pass is noisy
@@ -113,12 +118,20 @@ pub struct Episode {
 }
 
 /// Picks the lessons for `you`, using the deep results in `analysis`.
-pub fn episodes(game: &Game, analysis: &GameAnalysis, you: Color, candidates: &[usize]) -> Vec<Episode> {
+pub fn episodes(
+    game: &Game,
+    analysis: &GameAnalysis,
+    you: Color,
+    candidates: &[usize],
+) -> Vec<Episode> {
     let size = game.info.size;
     let total = game.moves().len();
     let mut found: Vec<Episode> = Vec::new();
     for &i in candidates {
-        let (Some(before), Some(after)) = (analysis.deep.get(&i), analysis.deep.get(&(i + 1))) else { continue };
+        let (Some(before), Some(after)) = (analysis.deep.get(&i), analysis.deep.get(&(i + 1)))
+        else {
+            continue;
+        };
         let (color, mv) = game.moves()[i];
         let loss = loss_for(color, before, after);
         if loss < threshold(rank_of(game, color)) {
@@ -130,7 +143,14 @@ pub fn episodes(game: &Game, analysis: &GameAnalysis, you: Color, candidates: &[
         };
         let best_info = before.best();
         let best = best_info.and_then(|m| from_gtp(&m.mv, size));
-        let line: Vec<Point> = best_info.map(|m| m.pv.iter().filter_map(|s| from_gtp(s, size)).take(8).collect()).unwrap_or_default();
+        let line: Vec<Point> = best_info
+            .map(|m| {
+                m.pv.iter()
+                    .filter_map(|s| from_gtp(s, size))
+                    .take(8)
+                    .collect()
+            })
+            .unwrap_or_default();
         let board_before = board_at(game, i);
         let board_after = board_at(game, i + 1);
         let flips = group_flips(&board_after, before, after, size);
@@ -138,14 +158,34 @@ pub fn episodes(game: &Game, analysis: &GameAnalysis, you: Color, candidates: &[
             Move::Play { point } => Some(point),
             Move::Pass => None,
         });
-        let kind = classify(i, total, size, loss, played, best, previous, !flips.is_empty());
+        let kind = classify(
+            i,
+            total,
+            size,
+            loss,
+            played,
+            best,
+            previous,
+            !flips.is_empty(),
+        );
         let chance = chance_for(color, before);
         let impact = loss * (1.0 - (chance - 0.5).abs() * 1.6).clamp(0.2, 1.0);
-        let side = if color == you { Side::You } else { Side::Opponent };
+        let side = if color == you {
+            Side::You
+        } else {
+            Side::Opponent
+        };
         let punish = (side == Side::Opponent).then(|| punish_info(game, analysis, i, size));
         let (answer_line, your_reply) = if side == Side::Opponent {
             let after_info = analysis.best_known(i + 1).best();
-            let answer = after_info.map(|m| m.pv.iter().filter_map(|s| from_gtp(s, size)).take(8).collect()).unwrap_or_default();
+            let answer = after_info
+                .map(|m| {
+                    m.pv.iter()
+                        .filter_map(|s| from_gtp(s, size))
+                        .take(8)
+                        .collect()
+                })
+                .unwrap_or_default();
             let reply = game.moves().get(i + 1).and_then(|(_, mv)| match mv {
                 Move::Play { point } => Some(*point),
                 Move::Pass => None,
@@ -155,10 +195,37 @@ pub fn episodes(game: &Game, analysis: &GameAnalysis, you: Color, candidates: &[
             (Vec::new(), None)
         };
         let facts = FactSheet::build(FactInput {
-            game, side, index: i, color, kind, loss, before, after, played, best, line: &line,
-            board_before: &board_before, board_after: &board_after, flips: &flips, punish, you,
+            game,
+            side,
+            index: i,
+            color,
+            kind,
+            loss,
+            before,
+            after,
+            played,
+            best,
+            line: &line,
+            board_before: &board_before,
+            board_after: &board_after,
+            flips: &flips,
+            punish,
+            you,
         });
-        let ep = Episode { side, index: i, color, kind, points_lost: round1(loss), impact, played, best, line, answer_line, your_reply, facts };
+        let ep = Episode {
+            side,
+            index: i,
+            color,
+            kind,
+            points_lost: round1(loss),
+            impact,
+            played,
+            best,
+            line,
+            answer_line,
+            your_reply,
+            facts,
+        };
 
         // Merge with the previous episode of the same player when close.
         if let Some(prev) = found.iter_mut().rev().find(|e| e.color == color) {
@@ -216,7 +283,9 @@ fn classify(
     if group_flipped {
         return Kind::LifeAndDeath;
     }
-    let (Some(p), Some(b)) = (played, best) else { return Kind::Local };
+    let (Some(p), Some(b)) = (played, best) else {
+        return Kind::Local;
+    };
     let far = distance(p, b) >= 6;
     if let Some(prev) = previous {
         if far && distance(b, prev) <= 2 && distance(p, prev) > 2 {
@@ -244,7 +313,11 @@ fn punish_info(game: &Game, analysis: &GameAnalysis, i: usize, size: u8) -> Puni
         Move::Play { point } => Some(*point),
         Move::Pass => None,
     });
-    let found = match (game.moves().get(i + 1), analysis.quick.get(i + 1), analysis.quick.get(i + 2)) {
+    let found = match (
+        game.moves().get(i + 1),
+        analysis.quick.get(i + 1),
+        analysis.quick.get(i + 2),
+    ) {
         (Some((c, _)), Some(b), Some(a)) => your_reply == best_reply || loss_for(*c, b, a) < 1.0,
         _ => false,
     };
@@ -330,8 +403,14 @@ impl FactSheet {
     fn build(f: FactInput) -> FactSheet {
         let size = f.game.info.size;
         let spot = |p: Option<Point>| match p {
-            Some(p) => Spot { coord: to_gtp(p, size), area: area(p, size) },
-            None => Spot { coord: "pass".into(), area: "nowhere (a pass)" },
+            Some(p) => Spot {
+                coord: to_gtp(p, size),
+                area: area(p, size),
+            },
+            None => Spot {
+                coord: "pass".into(),
+                area: "nowhere (a pass)",
+            },
         };
         let mut c = f.color;
         let better_line = f
@@ -412,7 +491,9 @@ impl FactSheet {
 /// A Go coordinate on boards up to 25: a column letter (no I) and a row number.
 pub fn is_coordinate(word: &str) -> bool {
     let mut chars = word.chars();
-    let Some(first) = chars.next() else { return false };
+    let Some(first) = chars.next() else {
+        return false;
+    };
     let rest = chars.as_str();
     first.is_ascii_uppercase()
         && first != 'I'
@@ -439,9 +520,22 @@ fn group_flips(board: &Board, best: &TurnResult, played: &TurnResult, size: u8) 
         }
         let sign = if color == Color::Black { 1.0 } else { -1.0 };
         let avg = |r: &TurnResult| {
-            group.iter().filter_map(|s| r.ownership_at(*s, size)).sum::<f64>() / group.len() as f64 * sign
+            group
+                .iter()
+                .filter_map(|s| r.ownership_at(*s, size))
+                .sum::<f64>()
+                / group.len() as f64
+                * sign
         };
-        let status = |v: f64| if v > 0.3 { Some(true) } else if v < -0.3 { Some(false) } else { None };
+        let status = |v: f64| {
+            if v > 0.3 {
+                Some(true)
+            } else if v < -0.3 {
+                Some(false)
+            } else {
+                None
+            }
+        };
         match (status(avg(best)), status(avg(played))) {
             (Some(true), Some(false)) => out.push(format!(
                 "{}'s group of {} stones around {} lives in the better line but dies after the game move",
@@ -466,7 +560,10 @@ fn swings(best: &TurnResult, played: &TurnResult, mover: Color, size: u8) -> Vec
     for y in 0..size {
         for x in 0..size {
             let p = Point::new(x, y);
-            let (Some(b), Some(a)) = (best.ownership_at(p, size), played.ownership_at(p, size)) else { continue };
+            let (Some(b), Some(a)) = (best.ownership_at(p, size), played.ownership_at(p, size))
+            else {
+                continue;
+            };
             let lost = (b - a) * sign;
             let name = area(p, size);
             match by_area.iter_mut().find(|(n, _)| *n == name) {
@@ -478,7 +575,10 @@ fn swings(best: &TurnResult, played: &TurnResult, mover: Color, size: u8) -> Vec
     let mut out: Vec<Swing> = by_area
         .into_iter()
         .filter(|(_, v)| v.abs() >= 1.5)
-        .map(|(area, v)| Swing { area, points: round1(v) })
+        .map(|(area, v)| Swing {
+            area,
+            points: round1(v),
+        })
         .collect();
     out.sort_by(|a, b| b.points.abs().total_cmp(&a.points.abs()));
     out.truncate(4);
@@ -499,11 +599,17 @@ fn pressure(board: &Board, near: [Option<Point>; 2]) -> Vec<String> {
             seen.insert((s.x, s.y));
         }
         let libs = board.liberties(&group);
-        let close = near.iter().flatten().any(|n| group.iter().any(|s| distance(*s, *n) <= 4));
+        let close = near
+            .iter()
+            .flatten()
+            .any(|n| group.iter().any(|s| distance(*s, *n) <= 4));
         if group.len() >= 2 && libs <= 2 && close {
             out.push(format!(
                 "{}'s {} stones around {} have {} {}",
-                color_name(color), group.len(), to_gtp(center(&group), size), libs,
+                color_name(color),
+                group.len(),
+                to_gtp(center(&group), size),
+                libs,
                 if libs == 1 { "liberty" } else { "liberties" }
             ));
         }
@@ -563,7 +669,13 @@ fn center(group: &[Point]) -> Point {
 pub fn area(p: Point, size: u8) -> &'static str {
     let third = |v: u8| {
         let f = v as f64 / (size.max(2) - 1) as f64;
-        if f < 0.33 { 0 } else if f > 0.67 { 2 } else { 1 }
+        if f < 0.33 {
+            0
+        } else if f > 0.67 {
+            2
+        } else {
+            1
+        }
     };
     match (third(p.x), third(p.y)) {
         (0, 0) => "top left corner",
@@ -632,11 +744,28 @@ mod tests {
     use super::*;
     use crate::katago::{MoveInfo, RootInfo};
 
-    fn result(turn: usize, lead: f64, winrate: f64, best: &str, ownership: Option<Vec<f64>>) -> TurnResult {
+    fn result(
+        turn: usize,
+        lead: f64,
+        winrate: f64,
+        best: &str,
+        ownership: Option<Vec<f64>>,
+    ) -> TurnResult {
         TurnResult {
             turn_number: turn,
-            root_info: RootInfo { winrate, score_lead: lead, visits: 100 },
-            move_infos: vec![MoveInfo { mv: best.into(), visits: 100, winrate, score_lead: lead, pv: vec![best.into()], order: 0 }],
+            root_info: RootInfo {
+                winrate,
+                score_lead: lead,
+                visits: 100,
+            },
+            move_infos: vec![MoveInfo {
+                mv: best.into(),
+                visits: 100,
+                winrate,
+                score_lead: lead,
+                pv: vec![best.into()],
+                order: 0,
+            }],
             ownership,
         }
     }
@@ -671,13 +800,55 @@ mod tests {
     fn classifies_urgency_and_tempo() {
         let p = Point::new;
         // Opponent played D4; the best move answers it; you played far away.
-        assert_eq!(classify(50, 200, 19, 5.0, Some(p(15, 15)), Some(p(3, 4)), Some(p(3, 3)), false), Kind::Urgency);
+        assert_eq!(
+            classify(
+                50,
+                200,
+                19,
+                5.0,
+                Some(p(15, 15)),
+                Some(p(3, 4)),
+                Some(p(3, 3)),
+                false
+            ),
+            Kind::Urgency
+        );
         // You answered next to the opponent's move while the best was elsewhere.
-        assert_eq!(classify(50, 200, 19, 5.0, Some(p(3, 4)), Some(p(15, 15)), Some(p(3, 3)), false), Kind::Tempo);
-        assert_eq!(classify(180, 200, 19, 3.0, Some(p(3, 4)), Some(p(4, 4)), Some(p(10, 10)), false), Kind::Endgame);
-        assert_eq!(classify(50, 200, 19, 9.0, Some(p(3, 4)), Some(p(4, 4)), None, true), Kind::LifeAndDeath);
+        assert_eq!(
+            classify(
+                50,
+                200,
+                19,
+                5.0,
+                Some(p(3, 4)),
+                Some(p(15, 15)),
+                Some(p(3, 3)),
+                false
+            ),
+            Kind::Tempo
+        );
+        assert_eq!(
+            classify(
+                180,
+                200,
+                19,
+                3.0,
+                Some(p(3, 4)),
+                Some(p(4, 4)),
+                Some(p(10, 10)),
+                false
+            ),
+            Kind::Endgame
+        );
+        assert_eq!(
+            classify(50, 200, 19, 9.0, Some(p(3, 4)), Some(p(4, 4)), None, true),
+            Kind::LifeAndDeath
+        );
         // Late in a very short game is still the opening, never the endgame.
-        assert_eq!(classify(6, 8, 9, 3.0, Some(p(3, 4)), Some(p(4, 4)), None, false), Kind::Local);
+        assert_eq!(
+            classify(6, 8, 9, 3.0, Some(p(3, 4)), Some(p(4, 4)), None, false),
+            Kind::Local
+        );
     }
 
     #[test]
@@ -698,7 +869,9 @@ mod tests {
             5,
         );
         assert_eq!(flips.len(), 1);
-        assert!(flips[0].starts_with("White's group of 3 stones around B5 lives in the better line"));
+        assert!(
+            flips[0].starts_with("White's group of 3 stones around B5 lives in the better line")
+        );
     }
 
     #[test]
@@ -707,7 +880,12 @@ mod tests {
         assert_eq!(area(Point::new(9, 9), 19), "center");
         assert_eq!(area(Point::new(15, 9), 19), "right side");
         assert!(is_coordinate("Q16") && is_coordinate("A1"));
-        assert!(!is_coordinate("I5") && !is_coordinate("B") && !is_coordinate("Q99") && !is_coordinate("Black"));
+        assert!(
+            !is_coordinate("I5")
+                && !is_coordinate("B")
+                && !is_coordinate("Q99")
+                && !is_coordinate("Black")
+        );
     }
 
     #[test]

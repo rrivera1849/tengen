@@ -25,7 +25,10 @@ pub struct GameAnalysis {
 impl GameAnalysis {
     /// Black's score lead at every position, for the score graph.
     pub fn leads(&self) -> Vec<f64> {
-        self.quick.iter().map(|r| self.best_known(r.turn_number).root_info.score_lead).collect()
+        self.quick
+            .iter()
+            .map(|r| self.best_known(r.turn_number).root_info.score_lead)
+            .collect()
     }
 
     /// The deep result for a turn when there is one, else the quick one.
@@ -42,13 +45,23 @@ pub fn fingerprint(game: &Game) -> String {
     let mut h = Sha256::new();
     h.update(sgf::write(&bare).as_bytes());
     h.update(format!("{QUICK_VISITS}/{DEEP_VISITS}").as_bytes());
-    h.finalize().iter().take(12).map(|b| format!("{b:02x}")).collect()
+    h.finalize()
+        .iter()
+        .take(12)
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Every position at a low visit count. `progress(done, total)` as turns finish.
-pub async fn quick_pass(engine: &Engine, game: &Game, progress: impl FnMut(usize, usize)) -> Result<Vec<TurnResult>, AiError> {
+pub async fn quick_pass(
+    engine: &Engine,
+    game: &Game,
+    progress: impl FnMut(usize, usize),
+) -> Result<Vec<TurnResult>, AiError> {
     let turns: Vec<usize> = (0..=game.moves().len()).collect();
-    engine.analyze(Query::for_game(game, turns, QUICK_VISITS, false), progress).await
+    engine
+        .analyze(Query::for_game(game, turns, QUICK_VISITS, false), progress)
+        .await
 }
 
 /// The given positions at a high visit count, with ownership.
@@ -61,5 +74,7 @@ pub async fn deep_pass(
     if turns.is_empty() {
         return Ok(Vec::new());
     }
-    engine.analyze(Query::for_game(game, turns, DEEP_VISITS, true), progress).await
+    engine
+        .analyze(Query::for_game(game, turns, DEEP_VISITS, true), progress)
+        .await
 }

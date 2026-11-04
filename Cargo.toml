@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/tengen-core", "crates/tengen-ogs", "crates/tengen-fox", "crates/tengen-ai", "src-tauri"]
+members = ["crates/tengen-core", "crates/tengen-ogs", "crates/tengen-fox", "crates/tengen-kgs", "crates/tengen-igs", "crates/tengen-ai", "src-tauri"]
 # The Tauri app needs the macOS (or Linux WebKitGTK) toolchain to build, so
 # `cargo test` at the root only covers the platform-independent crates.
-default-members = ["crates/tengen-core", "crates/tengen-ogs", "crates/tengen-fox", "crates/tengen-ai"]
+default-members = ["crates/tengen-core", "crates/tengen-ogs", "crates/tengen-fox", "crates/tengen-kgs", "crates/tengen-igs", "crates/tengen-ai"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +15,8 @@ repository = "https://github.com/rrivera1849/tengen"
 tengen-core = { path = "crates/tengen-core" }
 tengen-ogs = { path = "crates/tengen-ogs" }
 tengen-fox = { path = "crates/tengen-fox" }
+tengen-kgs = { path = "crates/tengen-kgs" }
+tengen-igs = { path = "crates/tengen-igs" }
 tengen-ai = { path = "crates/tengen-ai" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

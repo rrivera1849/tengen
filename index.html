@@ -92,7 +92,7 @@
 
       <div class="searching" id="searching" hidden>
         <span class="pulse" aria-hidden="true"></span>
-        <span>Looking for an opponent on OGS</span>
+        <span id="searching-text">Looking for an opponent</span>
         <button data-action="cancel-match">Cancel</button>
       </div>
 
@@ -126,16 +126,30 @@
 
     <dialog id="online-dialog">
       <form method="dialog">
-        <h2>Play on OGS</h2>
+        <h2>Play online</h2>
+        <div class="choices servers" data-pick="server" role="radiogroup" aria-label="Server">
+          <button value="OGS">OGS</button>
+          <button value="KGS">KGS</button>
+          <button value="IGS">Pandanet</button>
+        </div>
 
         <div data-when="signed-out">
-          <p class="lede">Sign in on online-go.com in your browser. Tengen never sees your password.</p>
-          <p class="lede" id="not-configured" hidden>
-            Tengen needs its OGS app registration first. The README explains the one-time setup.
-          </p>
+          <div data-auth="browser">
+            <p class="lede">Sign in on online-go.com in your browser. Tengen never sees your password.</p>
+            <p class="lede" id="not-configured" hidden>
+              Tengen needs its OGS app registration first. The README explains the one-time setup.
+            </p>
+          </div>
+          <div data-auth="password">
+            <label for="login-name">Name</label>
+            <input id="login-name" autocomplete="username" spellcheck="false" autocapitalize="off" />
+            <label for="login-password">Password</label>
+            <input id="login-password" type="password" autocomplete="current-password" />
+            <p class="hint" id="login-hint"></p>
+          </div>
           <div class="row">
             <button class="quiet" value="cancel">Cancel</button>
-            <button value="sign-in" class="primary" id="sign-in">Sign in with OGS</button>
+            <button value="sign-in" class="primary" id="sign-in">Sign in</button>
           </div>
         </div>
 

@@ -32,9 +32,15 @@ pub fn parse(text: &str) -> Result<Game, SgfError> {
     let root = nodes.first().ok_or(SgfError::NoGameTree)?;
 
     let first = |node: &Node, key: &str| {
-        node.iter().find(|(k, _)| k == key).and_then(|(_, v)| v.first().cloned())
+        node.iter()
+            .find(|(k, _)| k == key)
+            .and_then(|(_, v)| v.first().cloned())
     };
-    let text_prop = |key: &str| first(root, key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let text_prop = |key: &str| {
+        first(root, key)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
 
     if let Some(gm) = first(root, "GM") {
         if gm.trim() != "1" {
@@ -44,7 +50,13 @@ pub fn parse(text: &str) -> Result<Game, SgfError> {
     let size = match first(root, "SZ") {
         None => 19,
         Some(s) => {
-            let n: u8 = s.split(':').next().unwrap_or("").trim().parse().map_err(|_| SgfError::BadSize(s.clone()))?;
+            let n: u8 = s
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .parse()
+                .map_err(|_| SgfError::BadSize(s.clone()))?;
             if !(2..=25).contains(&n) {
                 return Err(SgfError::BadSize(s));
             }
@@ -54,7 +66,9 @@ pub fn parse(text: &str) -> Result<Game, SgfError> {
 
     let mut info = GameInfo {
         size,
-        komi: first(root, "KM").and_then(|k| k.trim().parse().ok()).unwrap_or(0.0),
+        komi: first(root, "KM")
+            .and_then(|k| k.trim().parse().ok())
+            .unwrap_or(0.0),
         black: text_prop("PB"),
         white: text_prop("PW"),
         black_rank: text_prop("BR"),
@@ -76,7 +90,10 @@ pub fn parse(text: &str) -> Result<Game, SgfError> {
 
     let mut game = Game::from_info(info);
     for node in &nodes {
-        let comment = node.iter().find(|(k, _)| k == "C").and_then(|(_, v)| v.first().cloned());
+        let comment = node
+            .iter()
+            .find(|(k, _)| k == "C")
+            .and_then(|(_, v)| v.first().cloned());
         for (key, values) in node {
             let color = match key.as_str() {
                 "B" => Color::Black,
@@ -103,8 +120,15 @@ pub fn write(game: &Game) -> String {
     out.push_str(&format!("AP[Tengen:{}]", env!("CARGO_PKG_VERSION")));
     out.push_str(&format!("SZ[{}]KM[{}]", i.size, i.komi));
     for (key, value) in [
-        ("PB", &i.black), ("BR", &i.black_rank), ("PW", &i.white), ("WR", &i.white_rank),
-        ("RE", &i.result), ("DT", &i.date), ("RU", &i.rules), ("EV", &i.event), ("PC", &i.server),
+        ("PB", &i.black),
+        ("BR", &i.black_rank),
+        ("PW", &i.white),
+        ("WR", &i.white_rank),
+        ("RE", &i.result),
+        ("DT", &i.date),
+        ("RU", &i.rules),
+        ("EV", &i.event),
+        ("PC", &i.server),
     ] {
         if let Some(v) = value {
             out.push_str(&format!("{key}[{}]", escape(v)));
@@ -145,7 +169,10 @@ pub fn write(game: &Game) -> String {
 pub fn suggested_filename(game: &Game) -> String {
     let i = &game.info;
     let player = |name: &Option<String>, rank: &Option<String>, fallback: &str| {
-        let name = name.as_deref().filter(|n| !n.trim().is_empty()).unwrap_or(fallback);
+        let name = name
+            .as_deref()
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or(fallback);
         match rank.as_deref().filter(|r| !r.trim().is_empty()) {
             Some(r) => format!("{} ({})", name.trim(), r.trim()),
             None => name.trim().to_string(),
@@ -159,7 +186,12 @@ pub fn suggested_filename(game: &Game) -> String {
     if let Some(t) = &i.time {
         parts.push(t.trim().replace(':', "."));
     }
-    parts.push(i.server.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Local".into()));
+    parts.push(
+        i.server
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "Local".into()),
+    );
     parts.push(format!(
         "{} vs {}",
         player(&i.black, &i.black_rank, "Black"),
@@ -168,7 +200,13 @@ pub fn suggested_filename(game: &Game) -> String {
     let name = parts.join(" ");
     let clean: String = name
         .chars()
-        .map(|c| if matches!(c, '/' | ':' | '\\') { '-' } else { c })
+        .map(|c| {
+            if matches!(c, '/' | ':' | '\\') {
+                '-'
+            } else {
+                c
+            }
+        })
         .filter(|c| !c.is_control())
         .collect();
     format!("{}.sgf", clean.trim())
@@ -190,7 +228,11 @@ fn point(v: &str, size: u8) -> Result<Option<Point>, SgfError> {
         b'A'..=b'Z' => Some(c - b'A' + 26),
         _ => None,
     };
-    match (b.len(), b.first().and_then(|&c| to_n(c)), b.get(1).and_then(|&c| to_n(c))) {
+    match (
+        b.len(),
+        b.first().and_then(|&c| to_n(c)),
+        b.get(1).and_then(|&c| to_n(c)),
+    ) {
         (2, Some(x), Some(y)) if x < size && y < size => Ok(Some(Point::new(x, y))),
         _ => Err(SgfError::BadPoint(v.to_string())),
     }
@@ -228,7 +270,10 @@ struct MainLine<'a> {
 
 impl<'a> MainLine<'a> {
     fn new(text: &'a str) -> Self {
-        MainLine { src: text.as_bytes(), pos: 0 }
+        MainLine {
+            src: text.as_bytes(),
+            pos: 0,
+        }
     }
 
     fn read(mut self) -> Result<Vec<Node>, SgfError> {
@@ -329,7 +374,10 @@ impl<'a> MainLine<'a> {
     }
 
     fn peek(&self) -> Result<u8, SgfError> {
-        self.src.get(self.pos).copied().ok_or(SgfError::UnexpectedEof)
+        self.src
+            .get(self.pos)
+            .copied()
+            .ok_or(SgfError::UnexpectedEof)
     }
 
     fn expect(&mut self, c: u8) -> Result<(), SgfError> {
@@ -348,7 +396,8 @@ impl<'a> MainLine<'a> {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = "(;FF[4]GM[1]SZ[19]KM[6.5]PB[Shin Jinseo]PW[Ke Jie]BR[9p]WR[9p]RE[B+R]DT[2026-05-01]
+    const SAMPLE: &str =
+        "(;FF[4]GM[1]SZ[19]KM[6.5]PB[Shin Jinseo]PW[Ke Jie]BR[9p]WR[9p]RE[B+R]DT[2026-05-01]
         ;B[pd];W[dp](;B[pp];W[dd])(;B[dd]))";
 
     #[test]
@@ -359,7 +408,15 @@ mod tests {
         assert_eq!(g.info.black.as_deref(), Some("Shin Jinseo"));
         assert_eq!(g.info.result.as_deref(), Some("B+R"));
         assert_eq!(g.moves().len(), 4, "follows the first variation only");
-        assert_eq!(g.moves()[0], (Color::Black, Move::Play { point: Point::new(15, 3) }));
+        assert_eq!(
+            g.moves()[0],
+            (
+                Color::Black,
+                Move::Play {
+                    point: Point::new(15, 3)
+                }
+            )
+        );
     }
 
     #[test]
@@ -375,7 +432,10 @@ mod tests {
         let g = parse(r"(;SZ[9]AB[cc:dc]PW[a \] b];W[];B[tt])").unwrap();
         assert_eq!(g.info.setup_black, vec![Point::new(2, 2), Point::new(3, 2)]);
         assert_eq!(g.info.white.as_deref(), Some("a ] b"));
-        assert_eq!(g.moves(), &[(Color::White, Move::Pass), (Color::Black, Move::Pass)]);
+        assert_eq!(
+            g.moves(),
+            &[(Color::White, Move::Pass), (Color::Black, Move::Pass)]
+        );
         assert!(write(&g).contains(r"PW[a \] b]"));
     }
 
@@ -383,7 +443,10 @@ mod tests {
     fn keeps_comments_on_their_moves() {
         let mut g = parse("(;SZ[9]C[root note];B[ee];W[cc]C[a [quoted\\] lesson])").unwrap();
         assert_eq!(g.comments.get(&0).map(String::as_str), Some("root note"));
-        assert_eq!(g.comments.get(&2).map(String::as_str), Some("a [quoted] lesson"));
+        assert_eq!(
+            g.comments.get(&2).map(String::as_str),
+            Some("a [quoted] lesson")
+        );
         g.comments.insert(1, "Black's first move".into());
         let again = parse(&write(&g)).unwrap();
         assert_eq!(again.comments, g.comments);
@@ -391,7 +454,10 @@ mod tests {
 
     #[test]
     fn rejects_other_games() {
-        assert_eq!(parse("(;GM[3];B[aa])").unwrap_err(), SgfError::NotGo("3".into()));
+        assert_eq!(
+            parse("(;GM[3];B[aa])").unwrap_err(),
+            SgfError::NotGo("3".into())
+        );
         assert_eq!(parse("hello").unwrap_err(), SgfError::NoGameTree);
     }
 
@@ -399,13 +465,19 @@ mod tests {
     fn filename_names_server_players_ranks_and_time() {
         let mut g = parse("(;PB[Rafael]BR[3d]PW[Opp]WR[2k]DT[2026-11-04]PC[OGS])").unwrap();
         g.info.time = Some("21:34".into());
-        assert_eq!(suggested_filename(&g), "2026-11-04 21.34 OGS Rafael (3d) vs Opp (2k).sgf");
+        assert_eq!(
+            suggested_filename(&g),
+            "2026-11-04 21.34 OGS Rafael (3d) vs Opp (2k).sgf"
+        );
     }
 
     #[test]
     fn filename_without_details_is_still_useful_and_safe() {
         let g = parse("(;PB[a/b]PW[c]DT[2026-11-03,04])").unwrap();
         assert_eq!(suggested_filename(&g), "2026-11-03 Local a-b vs c.sgf");
-        assert_eq!(suggested_filename(&Game::new(19, 6.5)), "Local Black vs White.sgf");
+        assert_eq!(
+            suggested_filename(&Game::new(19, 6.5)),
+            "Local Black vs White.sgf"
+        );
     }
 }

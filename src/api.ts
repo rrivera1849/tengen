@@ -6,12 +6,16 @@ import { listen } from "@tauri-apps/api/event";
 
 export type Color = "black" | "white";
 export type Speed = "blitz" | "rapid" | "live";
+/** OGS signs in through the browser; KGS and IGS (Pandanet) with a name and password. */
+export type ServerName = "OGS" | "KGS" | "IGS";
 
 export interface LiveView {
   gameId: number;
   myColor: Color | null;
   phase: "play" | "stone removal" | "finished" | string;
   removed: [number, number][];
+  /** True while scoring on a server where you click dead stones yourself. */
+  markDead: boolean;
 }
 
 export interface View {
@@ -34,7 +38,9 @@ export interface View {
   live: LiveView | null;
 }
 
-export interface OgsStatus {
+export interface ServerStatus {
+  server: ServerName;
+  /** False for OGS until Tengen is registered there (see the README). */
   configured: boolean;
   signedIn: boolean;
   connected: boolean;
@@ -49,6 +55,8 @@ export interface PlayerClock {
   periods: number | null;
   periodTime: number | null;
   periodLeft: number | null;
+  /** Canadian overtime: `periods` is the stones left to play in this period. */
+  canadian?: boolean;
 }
 
 export interface Clock {
@@ -130,11 +138,15 @@ export const api = {
   saveSgf: () => call<string | null>("save_sgf"),
   downloadOgs: (game: string) => call<View>("download_ogs", { game }),
 
-  ogsStatus: () => call<OgsStatus>("ogs_status"),
-  signIn: () => call<OgsStatus>("ogs_sign_in"),
-  signOut: () => call<OgsStatus>("ogs_sign_out"),
-  findMatch: (size: number, speed: Speed) => call<OgsStatus>("find_match", { size, speed }),
-  cancelMatch: () => call<OgsStatus>("cancel_match"),
+  serverStatus: () => call<ServerStatus[]>("server_status"),
+  /** OGS: opens the browser to sign in. */
+  ogsSignIn: () => call<ServerStatus[]>("ogs_sign_in"),
+  /** KGS and Pandanet: the login is checked, then kept in Keychain. */
+  signIn: (server: ServerName, username: string, password: string) =>
+    call<ServerStatus[]>("server_sign_in", { server, username, password }),
+  signOut: (server: ServerName) => call<ServerStatus[]>("server_sign_out", { server }),
+  findMatch: (server: ServerName, size: number, speed: Speed) => call<ServerStatus[]>("find_match", { server, size, speed }),
+  cancelMatch: () => call<ServerStatus[]>("cancel_match"),
   resign: () => call<void>("resign"),
   acceptScore: () => call<void>("accept_score"),
   leaveGame: () => call<View>("leave_game"),
@@ -152,7 +164,7 @@ export const api = {
 /** Updates pushed from Rust: the board, the account, clocks and short notices. */
 export function onEvents(handlers: {
   view: (v: View) => void;
-  ogs: (s: OgsStatus) => void;
+  servers: (s: ServerStatus[]) => void;
   clock: (c: Clock) => void;
   notice: (text: string) => void;
   progress: (p: Progress) => void;
@@ -160,7 +172,7 @@ export function onEvents(handlers: {
   if (!inApp) return;
   listen<Progress>("ai-progress", (e) => handlers.progress(e.payload));
   listen<View>("view", (e) => handlers.view(e.payload));
-  listen<OgsStatus>("ogs", (e) => handlers.ogs(e.payload));
+  listen<ServerStatus[]>("servers", (e) => handlers.servers(e.payload));
   listen<Clock>("clock", (e) => handlers.clock(e.payload));
   listen<string>("notice", (e) => handlers.notice(e.payload));
 }
@@ -175,9 +187,13 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 function preview(command: string): unknown {
   const params = new URLSearchParams(location.search);
   const live = params.has("live");
-  if (command === "ogs_status") {
+  if (command === "server_status") {
     const signedIn = live || params.has("signedin");
-    return { configured: true, signedIn, connected: signedIn, username: "rafael", rank: "3d", searching: false, inGame: live };
+    const status = (server: ServerName, on: boolean): ServerStatus => ({
+      server, configured: true, signedIn: on, connected: on, username: on ? "rafael" : null, rank: on ? "12k" : null,
+      searching: false, inGame: live && server === "OGS",
+    });
+    return [status("OGS", signedIn), status("KGS", params.has("kgs")), status("IGS", false)];
   }
   if (command === "ai_status") return { katago: true, apiKey: true };
   if (command === "review_side") return "black";
@@ -203,7 +219,7 @@ function preview(command: string): unknown {
     result: null,
     server: "OGS",
     komi: 6.5,
-    live: live ? { gameId: 1, myColor: "black", phase: "play", removed: [] } : null,
+    live: live ? { gameId: 1, myColor: "black", phase: "play", removed: [], markDead: false } : null,
   } satisfies View;
 }
 

@@ -42,7 +42,10 @@ fn progress(app: &AppHandle, stage: &'static str, done: u64, total: u64) {
 }
 
 fn data_dir(app: &AppHandle, sub: &str) -> PathBuf {
-    let base = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("tengen"));
+    let base = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("tengen"));
     base.join(sub)
 }
 
@@ -56,9 +59,11 @@ pub fn status(app: &AppHandle) -> AiStatus {
 pub async fn install(app: &AppHandle) -> Result<AiStatus, String> {
     let dir = data_dir(app, "katago");
     let handle = app.clone();
-    runtime::install(&dir, move |done, total| progress(&handle, "download", done, total))
-        .await
-        .map_err(|e| e.to_string())?;
+    runtime::install(&dir, move |done, total| {
+        progress(&handle, "download", done, total)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(status(app))
 }
 
@@ -69,9 +74,14 @@ async fn engine(app: &AppHandle) -> Result<Arc<Engine>, String> {
     if let Some(e) = slot.as_ref() {
         return Ok(e.clone());
     }
-    let rt = runtime::locate(&data_dir(app, "katago")).ok_or_else(|| AiError::NotInstalled.to_string())?;
+    let rt = runtime::locate(&data_dir(app, "katago"))
+        .ok_or_else(|| AiError::NotInstalled.to_string())?;
     progress(app, "starting", 0, 1);
-    let e = Arc::new(Engine::start(&rt.binary, &rt.model, &rt.config).await.map_err(|e| e.to_string())?);
+    let e = Arc::new(
+        Engine::start(&rt.binary, &rt.model, &rt.config)
+            .await
+            .map_err(|e| e.to_string())?,
+    );
     *slot = Some(e.clone());
     Ok(e)
 }
@@ -82,7 +92,11 @@ async fn reset_engine(app: &AppHandle) {
 }
 
 fn current_game(app: &AppHandle) -> Game {
-    app.state::<AppState>().game.lock().expect("game lock").clone()
+    app.state::<AppState>()
+        .game
+        .lock()
+        .expect("game lock")
+        .clone()
 }
 
 pub async fn estimate(app: &AppHandle) -> Result<Estimate, String> {
@@ -139,23 +153,39 @@ pub struct LessonView {
 /// Which side the player was, when Tengen can tell without asking.
 pub fn guess_you(app: &AppHandle) -> Option<Color> {
     let state = app.state::<AppState>();
-    let live = state.live.lock().expect("live lock");
-    if let Some(c) = live.as_ref().and_then(|l| l.game.as_ref()).and_then(|g| g.my_color) {
+    let mut names = crate::sessions::usernames(&state);
+    {
+        let live = state.live.lock().expect("live lock");
+        if let Some(c) = live
+            .as_ref()
+            .and_then(|l| l.game.as_ref())
+            .and_then(|g| g.my_color)
+        {
+            return Some(c);
+        }
+        names.extend(live.as_ref().map(|l| l.me.username.to_lowercase()));
+    }
+    if let Some(c) = crate::sessions::my_color(&state) {
         return Some(c);
     }
-    let me = live.as_ref().map(|l| l.me.username.to_lowercase())?;
-    drop(live);
     let game = state.game.lock().expect("game lock");
-    match (&game.info.black, &game.info.white) {
-        (Some(b), _) if b.to_lowercase() == me => Some(Color::Black),
-        (_, Some(w)) if w.to_lowercase() == me => Some(Color::White),
+    let is_me = |n: &Option<String>| {
+        n.as_ref()
+            .is_some_and(|n| names.contains(&n.to_lowercase()))
+    };
+    match (is_me(&game.info.black), is_me(&game.info.white)) {
+        (true, false) => Some(Color::Black),
+        (false, true) => Some(Color::White),
         _ => None,
     }
 }
 
 pub async fn review(app: &AppHandle, you: Color) -> Result<ReviewView, String> {
     let ai = app.state::<AiState>();
-    let _one = ai.reviewing.try_lock().map_err(|_| "A review is already running".to_string())?;
+    let _one = ai
+        .reviewing
+        .try_lock()
+        .map_err(|_| "A review is already running".to_string())?;
     let game = {
         let mut g = current_game(app);
         g.go_to(g.moves().len());
@@ -166,7 +196,10 @@ pub async fn review(app: &AppHandle, you: Color) -> Result<ReviewView, String> {
     }
     let fingerprint = analysis::fingerprint(&game);
     let cache = data_dir(app, "reviews").join(format!("{fingerprint}-{}.json", color_key(you)));
-    if let Some(cached) = std::fs::read_to_string(&cache).ok().and_then(|t| serde_json::from_str::<ReviewView>(&t).ok()) {
+    if let Some(cached) = std::fs::read_to_string(&cache)
+        .ok()
+        .and_then(|t| serde_json::from_str::<ReviewView>(&t).ok())
+    {
         let needs_prose = cached.note.is_some() && keychain::load_claude_key().is_some();
         if !needs_prose {
             attach_comments(app, &fingerprint, &cached);
@@ -211,7 +244,10 @@ pub async fn review(app: &AppHandle, you: Color) -> Result<ReviewView, String> {
         views.push(lesson_view(e, lesson, problem));
     }
     let summary = match (&key, written.is_empty()) {
-        (Some(k), false) => llm::Client::new(k.clone()).write_summary(&written).await.ok(),
+        (Some(k), false) => llm::Client::new(k.clone())
+            .write_summary(&written)
+            .await
+            .ok(),
         _ => None,
     };
 
@@ -221,7 +257,12 @@ pub async fn review(app: &AppHandle, you: Color) -> Result<ReviewView, String> {
         .iter()
         .filter(|v| v.side == Side::You)
         .filter_map(|v| {
-            Some(maxims::Entry { date: today.clone(), game: fingerprint.clone(), kind: v.kind.clone(), maxim: v.lesson.as_ref()?.maxim.clone() })
+            Some(maxims::Entry {
+                date: today.clone(),
+                game: fingerprint.clone(),
+                kind: v.kind.clone(),
+                maxim: v.lesson.as_ref()?.maxim.clone(),
+            })
         })
         .collect::<Vec<_>>();
     if !entries.is_empty() {
@@ -229,8 +270,17 @@ pub async fn review(app: &AppHandle, you: Color) -> Result<ReviewView, String> {
         let _ = store.save();
     }
 
-    let note = key.is_none().then(|| "Add a Claude API key to get written lessons and maxims.".to_string());
-    let view = ReviewView { fingerprint: fingerprint.clone(), you, leads: analysis.leads(), summary, lessons: views, note };
+    let note = key
+        .is_none()
+        .then(|| "Add a Claude API key to get written lessons and maxims.".to_string());
+    let view = ReviewView {
+        fingerprint: fingerprint.clone(),
+        you,
+        leads: analysis.leads(),
+        summary,
+        lessons: views,
+        note,
+    };
     if let Some(dir) = cache.parent() {
         let _ = std::fs::create_dir_all(dir);
         let _ = std::fs::write(&cache, serde_json::to_string(&view).unwrap_or_default());
@@ -242,20 +292,30 @@ pub async fn review(app: &AppHandle, you: Color) -> Result<ReviewView, String> {
 /// Runs, or reloads, KataGo's two passes over the game.
 async fn analyse(app: &AppHandle, game: &Game) -> Result<GameAnalysis, String> {
     let path = data_dir(app, "analysis").join(format!("{}.json", analysis::fingerprint(game)));
-    if let Some(a) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<GameAnalysis>(&t).ok()) {
+    if let Some(a) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<GameAnalysis>(&t).ok())
+    {
         return Ok(a);
     }
     let engine = engine(app).await?;
     let h = app.clone();
-    let quick = analysis::quick_pass(&engine, game, move |d, t| progress(&h, "quick", d as u64, t as u64))
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut a = GameAnalysis { quick, ..Default::default() };
+    let quick = analysis::quick_pass(&engine, game, move |d, t| {
+        progress(&h, "quick", d as u64, t as u64)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut a = GameAnalysis {
+        quick,
+        ..Default::default()
+    };
     let turns = review::deep_turns(&review::candidates(game, &a.quick));
     let h = app.clone();
-    for r in analysis::deep_pass(&engine, game, turns, move |d, t| progress(&h, "deep", d as u64, t as u64))
-        .await
-        .map_err(|e| e.to_string())?
+    for r in analysis::deep_pass(&engine, game, turns, move |d, t| {
+        progress(&h, "deep", d as u64, t as u64)
+    })
+    .await
+    .map_err(|e| e.to_string())?
     {
         a.deep.insert(r.turn_number, r);
     }
@@ -299,20 +359,40 @@ fn attach_comments(app: &AppHandle, fingerprint: &str, view: &ReviewView) {
     }
     for l in &view.lessons {
         let Some(lesson) = &l.lesson else { continue };
-        let who = if l.side == Side::You { "Your mistake" } else { "Opponent's mistake" };
+        let who = if l.side == Side::You {
+            "Your mistake"
+        } else {
+            "Opponent's mistake"
+        };
         let text = format!(
             "Tengen review. {who}, {}: {}\n\n{}\n\nBetter: {}. {}\n\n{}\n\nMaxim: {}",
-            l.kind, lesson.headline, lesson.what_happened, l.best_coord, lesson.better_idea, lesson.why, lesson.maxim
+            l.kind,
+            lesson.headline,
+            lesson.what_happened,
+            l.best_coord,
+            lesson.better_idea,
+            lesson.why,
+            lesson.maxim
         );
         game.comments.insert(l.move_number, text);
     }
     if let Some(s) = &view.summary {
-        game.comments.insert(0, format!("Tengen review. {}\n\n{}\n\nMaxim: {}", s.summary, s.theme, s.maxim));
+        game.comments.insert(
+            0,
+            format!(
+                "Tengen review. {}\n\n{}\n\nMaxim: {}",
+                s.summary, s.theme, s.maxim
+            ),
+        );
     }
 }
 
 fn color_key(c: Color) -> &'static str {
-    if c == Color::Black { "b" } else { "w" }
+    if c == Color::Black {
+        "b"
+    } else {
+        "w"
+    }
 }
 
 pub fn maxims(app: &AppHandle) -> Vec<(String, Vec<String>)> {

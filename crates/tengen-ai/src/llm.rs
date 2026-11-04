@@ -95,17 +95,25 @@ pub struct Client {
 
 impl Client {
     pub fn new(key: impl Into<String>) -> Client {
-        Client { http: reqwest::Client::new(), key: key.into(), model: MODEL.to_string() }
+        Client {
+            http: reqwest::Client::new(),
+            key: key.into(),
+            model: MODEL.to_string(),
+        }
     }
 
     /// Writes the lesson for one episode. `Err(AiError::Llm)` with the
     /// problems listed when it fails its checks twice.
     pub async fn write_lesson(&self, sheet: &FactSheet) -> Result<Lesson, AiError> {
-        let facts = serde_json::to_string_pretty(sheet).map_err(|e| AiError::Other(e.to_string()))?;
+        let facts =
+            serde_json::to_string_pretty(sheet).map_err(|e| AiError::Other(e.to_string()))?;
         let mut prompt = format!("Fact sheet:\n{facts}");
         for attempt in 0..2 {
-            let input = self.call(SYSTEM, &prompt, lesson_tool(), "write_lesson").await?;
-            let lesson: Lesson = serde_json::from_value(input).map_err(|e| AiError::Llm(format!("malformed lesson: {e}")))?;
+            let input = self
+                .call(SYSTEM, &prompt, lesson_tool(), "write_lesson")
+                .await?;
+            let lesson: Lesson = serde_json::from_value(input)
+                .map_err(|e| AiError::Llm(format!("malformed lesson: {e}")))?;
             let problems = check(&lesson, sheet);
             if problems.is_empty() {
                 return Ok(lesson);
@@ -122,14 +130,21 @@ impl Client {
     }
 
     /// The game-level summary, theme and maxim.
-    pub async fn write_summary(&self, lessons: &[(FactSheet, Lesson)]) -> Result<GameSummary, AiError> {
+    pub async fn write_summary(
+        &self,
+        lessons: &[(FactSheet, Lesson)],
+    ) -> Result<GameSummary, AiError> {
         let body: Vec<Value> = lessons
             .iter()
             .map(|(sheet, lesson)| json!({"facts": sheet, "lesson": lesson}))
             .collect();
-        let prompt = serde_json::to_string_pretty(&body).map_err(|e| AiError::Other(e.to_string()))?;
-        let input = self.call(SUMMARY_SYSTEM, &prompt, summary_tool(), "write_summary").await?;
-        let s: GameSummary = serde_json::from_value(input).map_err(|e| AiError::Llm(format!("malformed summary: {e}")))?;
+        let prompt =
+            serde_json::to_string_pretty(&body).map_err(|e| AiError::Other(e.to_string()))?;
+        let input = self
+            .call(SUMMARY_SYSTEM, &prompt, summary_tool(), "write_summary")
+            .await?;
+        let s: GameSummary = serde_json::from_value(input)
+            .map_err(|e| AiError::Llm(format!("malformed summary: {e}")))?;
         if contains_coordinate(&s.maxim) {
             return Err(AiError::Llm("the game maxim named a coordinate".into()));
         }
@@ -137,7 +152,13 @@ impl Client {
     }
 
     /// One Messages API call that must answer with the named tool.
-    async fn call(&self, system: &str, prompt: &str, tool: Value, name: &str) -> Result<Value, AiError> {
+    async fn call(
+        &self,
+        system: &str,
+        prompt: &str,
+        tool: Value,
+        name: &str,
+    ) -> Result<Value, AiError> {
         let body = json!({
             "model": self.model,
             "max_tokens": 1500,
@@ -158,7 +179,10 @@ impl Client {
         let status = resp.status();
         let reply: Value = resp.json().await.map_err(|e| AiError::Llm(e.to_string()))?;
         if !status.is_success() {
-            let message = reply.pointer("/error/message").and_then(Value::as_str).unwrap_or("unknown error");
+            let message = reply
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error");
             return Err(AiError::Llm(match status.as_u16() {
                 401 => "the Claude API key was rejected".into(),
                 429 => "the Claude API is busy or the key hit its limit; try again shortly".into(),
@@ -174,7 +198,10 @@ fn tool_input(reply: &Value, name: &str) -> Option<Value> {
         .get("content")?
         .as_array()?
         .iter()
-        .find(|b| b.get("type").and_then(Value::as_str) == Some("tool_use") && b.get("name").and_then(Value::as_str) == Some(name))?
+        .find(|b| {
+            b.get("type").and_then(Value::as_str) == Some("tool_use")
+                && b.get("name").and_then(Value::as_str) == Some(name)
+        })?
         .get("input")
         .cloned()
 }
@@ -183,7 +210,13 @@ fn tool_input(reply: &Value, name: &str) -> Option<Value> {
 pub fn check(lesson: &Lesson, sheet: &FactSheet) -> Vec<String> {
     let mut problems = Vec::new();
     let allowed = sheet.coordinates();
-    let text = [&lesson.headline, &lesson.what_happened, &lesson.better_idea, &lesson.why, &lesson.maxim];
+    let text = [
+        &lesson.headline,
+        &lesson.what_happened,
+        &lesson.better_idea,
+        &lesson.why,
+        &lesson.maxim,
+    ];
     let mut named: Vec<String> = lesson.points.clone();
     for t in text {
         named.extend(words(t).filter(|w| is_coordinate(w)).map(str::to_string));
@@ -207,9 +240,14 @@ pub fn check(lesson: &Lesson, sheet: &FactSheet) -> Vec<String> {
     let known = sheet.numbers();
     for t in text {
         for (n, unit) in quoted_numbers(t) {
-            let ok = known.iter().any(|k| (k - n).abs() <= if unit == "%" { 2.0 } else { 0.6 });
+            let ok = known
+                .iter()
+                .any(|k| (k - n).abs() <= if unit == "%" { 2.0 } else { 0.6 });
             if !ok {
-                problems.push(format!("{n}{} isn't a number from the fact sheet", if unit == "%" { "%" } else { " points" }));
+                problems.push(format!(
+                    "{n}{} isn't a number from the fact sheet",
+                    if unit == "%" { "%" } else { " points" }
+                ));
             }
         }
     }
@@ -236,8 +274,13 @@ fn quoted_numbers(t: &str) -> Vec<(f64, &'static str)> {
             }
             continue;
         }
-        let Ok(n) = clean.trim_end_matches('.').parse::<f64>() else { continue };
-        let next = tokens.get(i + 1).map(|w| w.to_ascii_lowercase()).unwrap_or_default();
+        let Ok(n) = clean.trim_end_matches('.').parse::<f64>() else {
+            continue;
+        };
+        let next = tokens
+            .get(i + 1)
+            .map(|w| w.to_ascii_lowercase())
+            .unwrap_or_default();
         if next.starts_with("point") {
             out.push((n, "points"));
         } else if next.starts_with("percent") {
@@ -263,14 +306,23 @@ mod tests {
             your_rank: Some("3k".into()),
             board: "   A B\n 2 . .\n 1 . .\n".into(),
             recent_moves: vec!["41 White R14".into()],
-            played: Spot { coord: "C3".into(), area: "bottom left corner" },
-            best: Spot { coord: "Q10".into(), area: "right side" },
+            played: Spot {
+                coord: "C3".into(),
+                area: "bottom left corner",
+            },
+            best: Spot {
+                coord: "Q10".into(),
+                area: "right side",
+            },
             better_line: vec!["Black Q10".into(), "White R12".into()],
             points_lost: 6.5,
             win_chance_before: 55,
             win_chance_after: 38,
             group_changes: vec![],
-            territory_swing: vec![Swing { area: "right side", points: 7.2 }],
+            territory_swing: vec![Swing {
+                area: "right side",
+                points: 7.2,
+            }],
             groups_under_pressure: vec![],
             punish: None,
             earlier_maxims: vec![],
@@ -282,8 +334,10 @@ mod tests {
         Lesson {
             headline: "The right side mattered more than the corner".into(),
             what_happened: "You took a small point at C3 while White approached at R14.".into(),
-            better_idea: "Q10 settles your stones on the right and reduces White's framework.".into(),
-            why: "The swing on the right side was about 7.2 points, so this cost you 6.5 points.".into(),
+            better_idea: "Q10 settles your stones on the right and reduces White's framework."
+                .into(),
+            why: "The swing on the right side was about 7.2 points, so this cost you 6.5 points."
+                .into(),
             maxim: "When your opponent builds, choose the biggest area first".into(),
             points: vec!["C3".into(), "Q10".into(), "R14".into()],
         }
@@ -300,7 +354,9 @@ mod tests {
         l.better_idea = "D4 was better, worth 12 points, a 30% swing.".into();
         let problems = check(&l, &sheet());
         assert!(problems.iter().any(|p| p.starts_with("D4")));
-        assert!(problems.iter().any(|p| p.starts_with("12 points") || p.contains("12 points")));
+        assert!(problems
+            .iter()
+            .any(|p| p.starts_with("12 points") || p.contains("12 points")));
         assert!(problems.iter().any(|p| p.contains("30%")));
     }
 
@@ -323,7 +379,10 @@ mod tests {
 
     #[test]
     fn finds_quoted_numbers() {
-        assert_eq!(quoted_numbers("lost 4.5 points, from 62% to 40 percent."), vec![(4.5, "points"), (62.0, "%"), (40.0, "%")]);
+        assert_eq!(
+            quoted_numbers("lost 4.5 points, from 62% to 40 percent."),
+            vec![(4.5, "points"), (62.0, "%"), (40.0, "%")]
+        );
         assert!(quoted_numbers("move 42 at Q10").is_empty());
     }
 }

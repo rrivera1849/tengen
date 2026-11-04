@@ -1,9 +1,11 @@
-//! The Tauri layer: commands the interface calls, plus the live OGS
-//! connection. Game logic lives in the crates; this file only wires them up.
+//! The Tauri layer: commands the interface calls, plus the live server
+//! connections (OGS in `live.rs`, KGS and Pandanet in `sessions.rs`). Game
+//! logic lives in the crates; this file only wires them up.
 
 mod ai;
 mod keychain;
 mod live;
+mod sessions;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -11,7 +13,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
-use tengen_core::adapter::{ServerAdapter, Speed};
+use tengen_core::adapter::{Server, ServerAdapter, Speed};
 use tengen_core::{sgf, Color, Game, Move, Point};
 use tengen_ogs::realtime::local_date_time_from_rfc3339;
 use tengen_ogs::{parse_game_ref, OgsAdapter};
@@ -22,6 +24,7 @@ pub struct AppState {
     pub game: Mutex<Game>,
     pub ogs: Mutex<OgsAdapter>,
     pub live: Mutex<Option<Live>>,
+    pub sessions: Mutex<sessions::Sessions>,
 }
 
 impl AppState {
@@ -54,7 +57,7 @@ pub struct View {
     live: Option<live::LiveView>,
 }
 
-pub fn view(game: &Game, live: Option<&Live>) -> View {
+pub fn view(game: &Game, live: Option<live::LiveView>) -> View {
     let b = game.board();
     let last = game.last_move();
     View {
@@ -77,15 +80,18 @@ pub fn view(game: &Game, live: Option<&Live>) -> View {
         result: game.info.result.clone(),
         server: game.info.server.clone(),
         komi: game.info.komi,
-        live: live.and_then(Live::view),
+        live,
     }
 }
 
 /// The current view, read under the locks.
 pub fn current_view(state: &AppState) -> View {
+    let other = sessions::live_view(state);
     let live = state.live.lock().expect("live lock");
+    let ogs = live.as_ref().and_then(Live::view);
+    drop(live);
     let game = state.game.lock().expect("game lock");
-    view(&game, live.as_ref())
+    view(&game, ogs.or(other))
 }
 
 pub fn push_view(app: &AppHandle) {
@@ -104,6 +110,17 @@ fn live_game(state: &AppState) -> Option<(tengen_ogs::realtime::Realtime, live::
     Some((l.rt.clone(), l.game.clone()?))
 }
 
+/// True while a game on any server is being played or scored.
+fn in_live_game(state: &AppState) -> bool {
+    live::in_game(state) || sessions::in_game(state)
+}
+
+/// Stops following live games; the record stays on the board.
+fn close_live(state: &AppState) {
+    live::close_game(state);
+    sessions::close_game(state);
+}
+
 fn stamp_now(game: &mut Game) {
     let now = chrono::Local::now();
     game.info.date = Some(now.format("%Y-%m-%d").to_string());
@@ -119,10 +136,10 @@ fn current(state: State<'_, AppState>) -> View {
 
 #[tauri::command]
 fn new_game(state: State<'_, AppState>, size: u8, komi: f32) -> Result<View, String> {
-    if live_game(&state).is_some_and(|(_, g)| g.phase != "finished") {
+    if in_live_game(&state) {
         return Err("Finish or resign the live game first".into());
     }
-    live::close_game(&state);
+    close_live(&state);
     let mut game = Game::new(size.clamp(5, 19), komi);
     stamp_now(&mut game);
     *state.game.lock().expect("game lock") = game;
@@ -132,7 +149,7 @@ fn new_game(state: State<'_, AppState>, size: u8, komi: f32) -> Result<View, Str
 #[tauri::command]
 fn play(state: State<'_, AppState>, x: u8, y: u8) -> Result<View, String> {
     let point = Point::new(x, y);
-    if let Some((rt, g)) = live_game(&state) {
+    if let Some((rt, g)) = live_game(&state).filter(|(_, g)| g.phase != "finished") {
         if g.phase != "play" {
             return Err("The game is being scored".into());
         }
@@ -150,6 +167,10 @@ fn play(state: State<'_, AppState>, x: u8, y: u8) -> Result<View, String> {
         rt.play(g.id, Some(point));
         return Ok(current_view(&state));
     }
+    if let Some(sent) = sessions::click(&state, point) {
+        sent?;
+        return Ok(current_view(&state));
+    }
     let mut game = state.game.lock().expect("game lock");
     game.play(point).map_err(|e| e.to_string())?;
     drop(game);
@@ -158,7 +179,7 @@ fn play(state: State<'_, AppState>, x: u8, y: u8) -> Result<View, String> {
 
 #[tauri::command]
 fn pass_turn(state: State<'_, AppState>) -> Result<View, String> {
-    if let Some((rt, g)) = live_game(&state) {
+    if let Some((rt, g)) = live_game(&state).filter(|(_, g)| g.phase != "finished") {
         let game = state.game.lock().expect("game lock");
         if g.phase != "play" || Some(game.to_move()) != g.my_color {
             return Err("It's your opponent's turn".into());
@@ -167,13 +188,17 @@ fn pass_turn(state: State<'_, AppState>) -> Result<View, String> {
         rt.play(g.id, None);
         return Ok(current_view(&state));
     }
+    if let Some(sent) = sessions::pass(&state) {
+        sent?;
+        return Ok(current_view(&state));
+    }
     state.game.lock().expect("game lock").pass();
     Ok(current_view(&state))
 }
 
 #[tauri::command]
 fn undo(state: State<'_, AppState>) -> Result<View, String> {
-    if live_game(&state).is_some_and(|(_, g)| g.phase != "finished") {
+    if in_live_game(&state) {
         return Err("Take-backs aren't available in live games yet".into());
     }
     state.game.lock().expect("game lock").undo();
@@ -197,19 +222,21 @@ fn records_folder(app: &AppHandle) -> Option<PathBuf> {
 
 #[tauri::command]
 async fn open_sgf(app: AppHandle, state: State<'_, AppState>) -> Result<Option<View>, String> {
-    if live_game(&state).is_some_and(|(_, g)| g.phase != "finished") {
+    if in_live_game(&state) {
         return Err("Finish or resign the live game first".into());
     }
     let mut dialog = app.dialog().file().add_filter("SGF game record", &["sgf"]);
     if let Some(dir) = records_folder(&app) {
         dialog = dialog.set_directory(dir);
     }
-    let Some(file) = dialog.blocking_pick_file() else { return Ok(None) };
+    let Some(file) = dialog.blocking_pick_file() else {
+        return Ok(None);
+    };
     let path = file.into_path().map_err(|e| e.to_string())?;
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut game = sgf::parse(&text).map_err(|e| e.to_string())?;
     game.go_to(0);
-    live::close_game(&state);
+    close_live(&state);
     *state.game.lock().expect("game lock") = game;
     Ok(Some(current_view(&state)))
 }
@@ -221,11 +248,17 @@ async fn save_sgf(app: AppHandle, state: State<'_, AppState>) -> Result<Option<S
         let g = state.game.lock().expect("game lock");
         (sgf::write(&g), sgf::suggested_filename(&g))
     };
-    let mut dialog = app.dialog().file().set_file_name(&name).add_filter("SGF game record", &["sgf"]);
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_file_name(&name)
+        .add_filter("SGF game record", &["sgf"]);
     if let Some(dir) = records_folder(&app) {
         dialog = dialog.set_directory(dir);
     }
-    let Some(file) = dialog.blocking_save_file() else { return Ok(None) };
+    let Some(file) = dialog.blocking_save_file() else {
+        return Ok(None);
+    };
     let path = file.into_path().map_err(|e| e.to_string())?;
     std::fs::write(&path, text).map_err(|e| e.to_string())?;
     Ok(Some(path.display().to_string()))
@@ -234,7 +267,7 @@ async fn save_sgf(app: AppHandle, state: State<'_, AppState>) -> Result<Option<S
 /// Downloads an OGS game (id or link) and loads it for review.
 #[tauri::command]
 async fn download_ogs(state: State<'_, AppState>, game: String) -> Result<View, String> {
-    if live_game(&state).is_some_and(|(_, g)| g.phase != "finished") {
+    if in_live_game(&state) {
         return Err("Finish or resign the live game first".into());
     }
     let id = parse_game_ref(&game).ok_or("That doesn't look like an OGS game number or link")?;
@@ -248,54 +281,90 @@ async fn download_ogs(state: State<'_, AppState>, game: String) -> Result<View, 
         record.info.time = time;
     }
     record.go_to(0);
-    live::close_game(&state);
+    close_live(&state);
     *state.game.lock().expect("game lock") = record;
     Ok(current_view(&state))
 }
 
-// ---------- OGS account and live play ----------
+// ---------- accounts and live play ----------
 
 #[tauri::command]
-fn ogs_status(state: State<'_, AppState>) -> live::OgsStatus {
-    live::status(&state)
+fn server_status(state: State<'_, AppState>) -> Vec<sessions::ServerStatus> {
+    sessions::statuses(&state)
 }
 
 #[tauri::command]
-async fn ogs_sign_in(app: AppHandle) -> Result<live::OgsStatus, String> {
+async fn ogs_sign_in(app: AppHandle) -> Result<Vec<sessions::ServerStatus>, String> {
     live::sign_in(&app).await?;
-    Ok(live::status(&app.state::<AppState>()))
+    Ok(sessions::statuses(&app.state::<AppState>()))
+}
+
+/// Signs in to KGS or Pandanet; the login is kept in Keychain.
+#[tauri::command]
+async fn server_sign_in(
+    app: AppHandle,
+    server: Server,
+    username: String,
+    password: String,
+) -> Result<Vec<sessions::ServerStatus>, String> {
+    if !sessions::PASSWORD_SERVERS.contains(&server) {
+        return Err(format!("{} doesn't sign in with a password", server.name()));
+    }
+    sessions::sign_in(&app, server, username, password).await?;
+    Ok(sessions::statuses(&app.state::<AppState>()))
 }
 
 #[tauri::command]
-fn ogs_sign_out(app: AppHandle, state: State<'_, AppState>) -> live::OgsStatus {
-    live::sign_out(&app, &state);
-    live::status(&state)
+fn server_sign_out(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    server: Server,
+) -> Vec<sessions::ServerStatus> {
+    match server {
+        Server::Ogs => live::sign_out(&app, &state),
+        other => sessions::sign_out(&app, other),
+    }
+    sessions::statuses(&state)
 }
 
 #[tauri::command]
-fn find_match(app: AppHandle, state: State<'_, AppState>, size: u8, speed: Speed) -> Result<live::OgsStatus, String> {
-    live::find_match(&app, &state, size, speed)?;
-    Ok(live::status(&state))
+fn find_match(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    server: Server,
+    size: u8,
+    speed: Speed,
+) -> Result<Vec<sessions::ServerStatus>, String> {
+    match server {
+        Server::Ogs => live::find_match(&app, &state, size, speed)?,
+        other => sessions::find_match(&app, other, size, speed)?,
+    }
+    Ok(sessions::statuses(&state))
 }
 
 #[tauri::command]
-fn cancel_match(state: State<'_, AppState>) -> live::OgsStatus {
+fn cancel_match(state: State<'_, AppState>) -> Vec<sessions::ServerStatus> {
     live::cancel_match(&state);
-    live::status(&state)
+    sessions::cancel_match(&state);
+    sessions::statuses(&state)
 }
 
 #[tauri::command]
 fn resign(state: State<'_, AppState>) -> Result<(), String> {
-    let (rt, g) = live_game(&state).ok_or("There's no live game to resign")?;
-    rt.resign(g.id);
-    Ok(())
+    if let Some((rt, g)) = live_game(&state).filter(|(_, g)| g.phase != "finished") {
+        rt.resign(g.id);
+        return Ok(());
+    }
+    sessions::resign(&state).ok_or_else(|| "There's no live game to resign".to_string())
 }
 
 #[tauri::command]
 fn accept_score(state: State<'_, AppState>) -> Result<(), String> {
-    let (rt, g) = live_game(&state).ok_or("There's no live game to score")?;
-    rt.accept_score(g.id, &g.removed);
-    Ok(())
+    if let Some((rt, g)) = live_game(&state).filter(|(_, g)| g.phase == "stone removal") {
+        rt.accept_score(g.id, &g.removed);
+        return Ok(());
+    }
+    sessions::accept_score(&state).ok_or_else(|| "There's no game being scored".to_string())
 }
 
 // ---------- score estimate and AI review ----------
@@ -323,8 +392,12 @@ fn review_side(app: AppHandle) -> Option<Color> {
 }
 
 #[tauri::command]
-async fn start_review(app: AppHandle, state: State<'_, AppState>, you: Color) -> Result<ai::ReviewView, String> {
-    if live_game(&state).is_some_and(|(_, g)| g.phase != "finished") {
+async fn start_review(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    you: Color,
+) -> Result<ai::ReviewView, String> {
+    if in_live_game(&state) {
         return Err("Reviews open once the game is over".into());
     }
     ai::review(&app, you).await
@@ -353,7 +426,7 @@ fn list_maxims(app: AppHandle) -> Vec<(String, Vec<String>)> {
 
 #[tauri::command]
 fn leave_game(state: State<'_, AppState>) -> View {
-    live::close_game(&state);
+    close_live(&state);
     current_view(&state)
 }
 
@@ -369,18 +442,45 @@ pub fn run() {
             }),
             ogs: Mutex::new(OgsAdapter::default()),
             live: Mutex::new(None),
+            sessions: Mutex::new(sessions::Sessions::default()),
         })
         .manage(ai::AiState::default())
         .setup(|app| {
             // Reconnect with the sign-in saved in Keychain, if there is one.
             let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move { live::resume(&handle).await });
+            tauri::async_runtime::spawn(async move {
+                live::resume(&handle).await;
+                sessions::resume(&handle).await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            current, new_game, play, pass_turn, undo, go_to, open_sgf, save_sgf, download_ogs,
-            ogs_status, ogs_sign_in, ogs_sign_out, find_match, cancel_match, resign, accept_score, leave_game,
-            ai_status, ai_install, estimate_score, review_side, start_review, set_claude_key, clear_claude_key, list_maxims
+            current,
+            new_game,
+            play,
+            pass_turn,
+            undo,
+            go_to,
+            open_sgf,
+            save_sgf,
+            download_ogs,
+            server_status,
+            ogs_sign_in,
+            server_sign_in,
+            server_sign_out,
+            find_match,
+            cancel_match,
+            resign,
+            accept_score,
+            leave_game,
+            ai_status,
+            ai_install,
+            estimate_score,
+            review_side,
+            start_review,
+            set_claude_key,
+            clear_claude_key,
+            list_maxims
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tengen");

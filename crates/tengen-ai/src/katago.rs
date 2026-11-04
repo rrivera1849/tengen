@@ -58,7 +58,12 @@ pub struct Query {
 
 impl Query {
     /// A query for `game`'s whole record; pick turns with `turns`.
-    pub fn for_game(game: &Game, turns: Vec<usize>, max_visits: u32, include_ownership: bool) -> Query {
+    pub fn for_game(
+        game: &Game,
+        turns: Vec<usize>,
+        max_visits: u32,
+        include_ownership: bool,
+    ) -> Query {
         let size = game.info.size;
         let c = |color: Color| if color == Color::Black { "B" } else { "W" }.to_string();
         let mut initial = Vec::new();
@@ -151,7 +156,10 @@ impl TurnResult {
     }
 
     pub fn ownership_at(&self, p: Point, size: u8) -> Option<f64> {
-        self.ownership.as_ref()?.get(p.y as usize * size as usize + p.x as usize).copied()
+        self.ownership
+            .as_ref()?
+            .get(p.y as usize * size as usize + p.x as usize)
+            .copied()
     }
 }
 
@@ -225,25 +233,46 @@ impl Engine {
             Ok(None) => return Err(AiError::Start("KataGo exited during start-up".into())),
             Err(_) => return Err(AiError::Start("KataGo took too long to start".into())),
         }
-        Ok(Engine { stdin: tokio::sync::Mutex::new(stdin), pending, next_id: AtomicU64::new(1), _child: child })
+        Ok(Engine {
+            stdin: tokio::sync::Mutex::new(stdin),
+            pending,
+            next_id: AtomicU64::new(1),
+            _child: child,
+        })
     }
 
     /// Sends a query; results arrive on the returned channel, one per turn,
     /// in whatever order KataGo finishes them.
-    pub async fn submit(&self, mut query: Query) -> Result<mpsc::UnboundedReceiver<Reply>, AiError> {
+    pub async fn submit(
+        &self,
+        mut query: Query,
+    ) -> Result<mpsc::UnboundedReceiver<Reply>, AiError> {
         query.id = format!("q{}", self.next_id.fetch_add(1, Ordering::SeqCst));
         let (tx, rx) = mpsc::unbounded_channel();
-        self.pending.lock().expect("pending").insert(query.id.clone(), tx);
+        self.pending
+            .lock()
+            .expect("pending")
+            .insert(query.id.clone(), tx);
         let mut line = serde_json::to_string(&query).map_err(|e| AiError::Other(e.to_string()))?;
         line.push('\n');
         let mut stdin = self.stdin.lock().await;
-        stdin.write_all(line.as_bytes()).await.map_err(|e| AiError::Engine(e.to_string()))?;
-        stdin.flush().await.map_err(|e| AiError::Engine(e.to_string()))?;
+        stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| AiError::Engine(e.to_string()))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| AiError::Engine(e.to_string()))?;
         Ok(rx)
     }
 
     /// Runs a query to completion. `progress(done, total)` is called as turns finish.
-    pub async fn analyze(&self, query: Query, mut progress: impl FnMut(usize, usize)) -> Result<Vec<TurnResult>, AiError> {
+    pub async fn analyze(
+        &self,
+        query: Query,
+        mut progress: impl FnMut(usize, usize),
+    ) -> Result<Vec<TurnResult>, AiError> {
         let total = query.analyze_turns.len();
         let mut rx = self.submit(query).await?;
         let mut out = Vec::with_capacity(total);
@@ -264,15 +293,20 @@ impl Engine {
 
 /// Hands one line of KataGo output to whoever is waiting for its id.
 fn route(routes: &Mutex<HashMap<String, mpsc::UnboundedSender<Reply>>>, line: &str) {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
-    let Some(id) = v.get("id").and_then(Value::as_str) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
+    let Some(id) = v.get("id").and_then(Value::as_str) else {
+        return;
+    };
     let routes = routes.lock().expect("routes");
     let Some(tx) = routes.get(id) else { return };
     if let Some(err) = v.get("error").and_then(Value::as_str) {
         let _ = tx.send(Err(err.to_string()));
         return;
     }
-    if v.get("warning").is_some() || v.get("isDuringSearch").and_then(Value::as_bool) == Some(true) {
+    if v.get("warning").is_some() || v.get("isDuringSearch").and_then(Value::as_bool) == Some(true)
+    {
         return;
     }
     match serde_json::from_value::<TurnResult>(v) {
@@ -286,7 +320,11 @@ fn route(routes: &Mutex<HashMap<String, mpsc::UnboundedSender<Reply>>>, line: &s
 }
 
 fn last_line(log: &str) -> String {
-    log.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no output").to_string()
+    log.lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("no output")
+        .to_string()
 }
 
 #[cfg(test)]
@@ -308,7 +346,13 @@ mod tests {
         g.play(Point::new(4, 4)).unwrap();
         g.pass();
         let q = Query::for_game(&g, vec![0, 1, 2], 100, false);
-        assert_eq!(q.moves, vec![["B".to_string(), "E5".to_string()], ["W".to_string(), "pass".to_string()]]);
+        assert_eq!(
+            q.moves,
+            vec![
+                ["B".to_string(), "E5".to_string()],
+                ["W".to_string(), "pass".to_string()]
+            ]
+        );
         let json = serde_json::to_string(&q).unwrap();
         assert!(json.contains(r#""boardXSize":9"#) && json.contains(r#""analyzeTurns":[0,1,2]"#));
         assert_eq!(rules_name(Some("nz")), "new-zealand");
@@ -319,12 +363,18 @@ mod tests {
         let routes: Mutex<HashMap<String, mpsc::UnboundedSender<Reply>>> = Mutex::default();
         let (tx, mut rx) = mpsc::unbounded_channel();
         routes.lock().unwrap().insert("q1".into(), tx);
-        route(&routes, r#"{"id":"q1","isDuringSearch":false,"turnNumber":2,"rootInfo":{"winrate":0.6,"scoreLead":2.5,"visits":100},
-            "moveInfos":[{"move":"D4","visits":50,"winrate":0.6,"scoreLead":2.5,"pv":["D4","Q16"],"order":0}]}"#);
+        route(
+            &routes,
+            r#"{"id":"q1","isDuringSearch":false,"turnNumber":2,"rootInfo":{"winrate":0.6,"scoreLead":2.5,"visits":100},
+            "moveInfos":[{"move":"D4","visits":50,"winrate":0.6,"scoreLead":2.5,"pv":["D4","Q16"],"order":0}]}"#,
+        );
         route(&routes, r#"{"id":"q1","error":"Illegal move 3: C3"}"#);
         route(&routes, r#"{"id":"other","turnNumber":0}"#);
         let first = rx.try_recv().unwrap().unwrap();
-        assert_eq!((first.turn_number, first.best().unwrap().mv.as_str()), (2, "D4"));
+        assert_eq!(
+            (first.turn_number, first.best().unwrap().mv.as_str()),
+            (2, "D4")
+        );
         assert!(rx.try_recv().unwrap().is_err());
         assert!(rx.try_recv().is_err(), "nothing for other ids");
     }

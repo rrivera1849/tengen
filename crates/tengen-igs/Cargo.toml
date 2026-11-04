@@ -1,0 +1,11 @@
+[package]
+name = "tengen-igs"
+description = "Pandanet (IGS) adapter for Tengen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tengen-core.workspace = true
+regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
+tokio = { workspace = true, features = ["net", "io-util", "sync", "time", "rt"] }

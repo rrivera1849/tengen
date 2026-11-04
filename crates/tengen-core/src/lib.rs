@@ -4,10 +4,12 @@
 //! - [`game`]: a game record (metadata + moves) with replay to any move.
 //! - [`sgf`]: reading and writing SGF files.
 //! - [`adapter`]: the interface every Go server adapter implements.
+//! - [`live`]: live play shared by servers with a generic session (KGS, Pandanet).
 
 pub mod adapter;
 pub mod board;
 pub mod game;
+pub mod live;
 pub mod sgf;
 
 pub use board::{Board, Color, MoveError, Point};

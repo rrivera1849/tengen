@@ -28,7 +28,9 @@ pub struct Estimate {
 pub async fn estimate(engine: &Engine, game: &Game) -> Result<Estimate, AiError> {
     let query = Query::for_game(game, vec![game.cursor()], VISITS, true);
     let result = engine.analyze(query, |_, _| {}).await?;
-    let r = result.first().ok_or_else(|| AiError::Engine("no estimate came back".into()))?;
+    let r = result
+        .first()
+        .ok_or_else(|| AiError::Engine("no estimate came back".into()))?;
     Ok(from_result(r, game.board()))
 }
 
@@ -39,7 +41,9 @@ pub fn from_result(r: &TurnResult, board: &Board) -> Estimate {
     for y in 0..size {
         for x in 0..size {
             let p = Point::new(x, y);
-            let Some(own) = r.ownership_at(p, size) else { continue };
+            let Some(own) = r.ownership_at(p, size) else {
+                continue;
+            };
             let owner = if own >= OWNED {
                 Some(Color::Black)
             } else if own <= -OWNED {
@@ -58,7 +62,13 @@ pub fn from_result(r: &TurnResult, board: &Board) -> Estimate {
         }
     }
     let lead = r.root_info.score_lead;
-    Estimate { lead, black_win_chance: r.root_info.winrate, territory, dead, headline: headline(lead) }
+    Estimate {
+        lead,
+        black_win_chance: r.root_info.winrate,
+        territory,
+        dead,
+        headline: headline(lead),
+    }
 }
 
 /// Rounds to the nearest half point, as scores are counted.
@@ -67,8 +77,15 @@ pub fn headline(lead: f64) -> String {
     if half < 0.5 {
         return "Even".into();
     }
-    let n = if half.fract() == 0.0 { format!("{half:.0}") } else { format!("{half:.1}") };
-    format!("{} leads by {n}", if lead > 0.0 { "Black" } else { "White" })
+    let n = if half.fract() == 0.0 {
+        format!("{half:.0}")
+    } else {
+        format!("{half:.1}")
+    };
+    format!(
+        "{} leads by {n}",
+        if lead > 0.0 { "Black" } else { "White" }
+    )
 }
 
 #[cfg(test)]
@@ -89,7 +106,11 @@ mod tests {
         b.set(Point::new(0, 0), Some(Color::White));
         let r = TurnResult {
             turn_number: 0,
-            root_info: RootInfo { winrate: 0.9, score_lead: 3.0, visits: 1 },
+            root_info: RootInfo {
+                winrate: 0.9,
+                score_lead: 3.0,
+                visits: 1,
+            },
             move_infos: vec![],
             ownership: Some(vec![0.95, 0.9, 0.2, -0.8]),
         };
@@ -97,6 +118,9 @@ mod tests {
         assert_eq!(e.dead, vec![(0, 0)], "the white stone sits in Black's area");
         assert!(e.territory.contains(&(1, 0, Color::Black)));
         assert!(e.territory.contains(&(1, 1, Color::White)));
-        assert!(!e.territory.iter().any(|t| (t.0, t.1) == (0, 1)), "0.2 is unsettled");
+        assert!(
+            !e.territory.iter().any(|t| (t.0, t.1) == (0, 1)),
+            "0.2 is unsettled"
+        );
     }
 }

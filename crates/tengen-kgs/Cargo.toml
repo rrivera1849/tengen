@@ -1,0 +1,12 @@
+[package]
+name = "tengen-kgs"
+description = "KGS adapter for Tengen, over the KGS JSON API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tengen-core.workspace = true
+serde_json.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "cookies"] }
+tokio = { workspace = true, features = ["sync", "time", "rt"] }

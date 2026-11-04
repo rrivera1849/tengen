@@ -25,7 +25,9 @@ pub const REDIRECT_URI: &str = "http://127.0.0.1:47613/oauth/callback";
 /// secret, so the id can live in the source. Set `TENGEN_OGS_CLIENT_ID` when
 /// building to use a different registration.
 pub fn client_id() -> Option<&'static str> {
-    option_env!("TENGEN_OGS_CLIENT_ID").or(DEFAULT_CLIENT_ID).filter(|id| !id.is_empty())
+    option_env!("TENGEN_OGS_CLIENT_ID")
+        .or(DEFAULT_CLIENT_ID)
+        .filter(|id| !id.is_empty())
 }
 
 /// Fill in once Tengen is registered at online-go.com/oauth2/applications/.
@@ -42,7 +44,11 @@ impl Pkce {
     pub fn new() -> Self {
         let verifier = random_token(32);
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-        Pkce { verifier, challenge, state: random_token(16) }
+        Pkce {
+            verifier,
+            challenge,
+            state: random_token(16),
+        }
     }
 }
 
@@ -68,7 +74,8 @@ impl Tokens {
 }
 
 pub fn authorize_url(base: &str, client_id: &str, pkce: &Pkce) -> String {
-    let mut url = reqwest::Url::parse(&format!("{base}/oauth2/authorize/")).expect("valid base url");
+    let mut url =
+        reqwest::Url::parse(&format!("{base}/oauth2/authorize/")).expect("valid base url");
     url.query_pairs_mut()
         .append_pair("client_id", client_id)
         .append_pair("response_type", "code")
@@ -87,13 +94,17 @@ pub async fn exchange_code(
     code: &str,
     verifier: &str,
 ) -> Result<Tokens, AdapterError> {
-    token_request(http, base, &[
-        ("grant_type", "authorization_code"),
-        ("code", code),
-        ("redirect_uri", REDIRECT_URI),
-        ("client_id", client_id),
-        ("code_verifier", verifier),
-    ])
+    token_request(
+        http,
+        base,
+        &[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", REDIRECT_URI),
+            ("client_id", client_id),
+            ("code_verifier", verifier),
+        ],
+    )
     .await
 }
 
@@ -103,15 +114,23 @@ pub async fn refresh(
     client_id: &str,
     refresh_token: &str,
 ) -> Result<Tokens, AdapterError> {
-    token_request(http, base, &[
-        ("grant_type", "refresh_token"),
-        ("refresh_token", refresh_token),
-        ("client_id", client_id),
-    ])
+    token_request(
+        http,
+        base,
+        &[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", client_id),
+        ],
+    )
     .await
 }
 
-async fn token_request(http: &reqwest::Client, base: &str, form: &[(&str, &str)]) -> Result<Tokens, AdapterError> {
+async fn token_request(
+    http: &reqwest::Client,
+    base: &str,
+    form: &[(&str, &str)],
+) -> Result<Tokens, AdapterError> {
     #[derive(Deserialize)]
     struct Reply {
         access_token: String,
@@ -142,10 +161,17 @@ async fn token_request(http: &reqwest::Client, base: &str, form: &[(&str, &str)]
 
 /// Serves the callback page until OGS redirects back with a code, or until
 /// `timeout` passes (the player closed the browser tab, say).
-pub async fn wait_for_code(expected_state: &str, timeout: std::time::Duration) -> Result<String, AdapterError> {
+pub async fn wait_for_code(
+    expected_state: &str,
+    timeout: std::time::Duration,
+) -> Result<String, AdapterError> {
     let listener = TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
         .await
-        .map_err(|e| AdapterError::Network(format!("couldn't open the sign-in page on port {CALLBACK_PORT}: {e}")))?;
+        .map_err(|e| {
+            AdapterError::Network(format!(
+                "couldn't open the sign-in page on port {CALLBACK_PORT}: {e}"
+            ))
+        })?;
     tokio::time::timeout(timeout, async {
         loop {
             let (mut stream, _) = listener.accept().await.map_err(|e| AdapterError::Network(e.to_string()))?;
@@ -181,9 +207,15 @@ fn parse_callback(request: &str, expected_state: &str) -> Option<Result<String, 
         return None;
     }
     let url = reqwest::Url::parse(&format!("http://127.0.0.1{target}")).ok()?;
-    let get = |k: &str| url.query_pairs().find(|(key, _)| key == k).map(|(_, v)| v.into_owned());
+    let get = |k: &str| {
+        url.query_pairs()
+            .find(|(key, _)| key == k)
+            .map(|(_, v)| v.into_owned())
+    };
     if get("state").as_deref() != Some(expected_state) {
-        return Some(Err(AdapterError::Protocol("sign-in reply didn't match this request".into())));
+        return Some(Err(AdapterError::Protocol(
+            "sign-in reply didn't match this request".into(),
+        )));
     }
     if let Some(err) = get("error") {
         return Some(Err(if err == "access_denied" {
@@ -217,26 +249,48 @@ mod tests {
     #[test]
     fn challenge_is_the_hashed_verifier() {
         let p = Pkce::new();
-        assert_eq!(p.challenge, URL_SAFE_NO_PAD.encode(Sha256::digest(p.verifier.as_bytes())));
-        assert!(p.verifier.len() >= 43, "RFC 7636 asks for at least 43 characters");
+        assert_eq!(
+            p.challenge,
+            URL_SAFE_NO_PAD.encode(Sha256::digest(p.verifier.as_bytes()))
+        );
+        assert!(
+            p.verifier.len() >= 43,
+            "RFC 7636 asks for at least 43 characters"
+        );
     }
 
     #[test]
     fn authorize_url_carries_pkce_and_redirect() {
-        let p = Pkce { verifier: "v".into(), challenge: "c h".into(), state: "s".into() };
+        let p = Pkce {
+            verifier: "v".into(),
+            challenge: "c h".into(),
+            state: "s".into(),
+        };
         let url = authorize_url("https://online-go.com", "abc", &p);
-        assert!(url.starts_with("https://online-go.com/oauth2/authorize/?client_id=abc&response_type=code"));
+        assert!(url.starts_with(
+            "https://online-go.com/oauth2/authorize/?client_id=abc&response_type=code"
+        ));
         assert!(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A47613%2Foauth%2Fcallback"));
         assert!(url.contains("code_challenge=c+h&code_challenge_method=S256"));
     }
 
     #[test]
     fn reads_the_callback() {
-        let ok = parse_callback("GET /oauth/callback?code=xyz&state=s HTTP/1.1\r\nHost: x\r\n\r\n", "s");
+        let ok = parse_callback(
+            "GET /oauth/callback?code=xyz&state=s HTTP/1.1\r\nHost: x\r\n\r\n",
+            "s",
+        );
         assert_eq!(ok.unwrap().unwrap(), "xyz");
         assert!(parse_callback("GET /favicon.ico HTTP/1.1\r\n", "s").is_none());
-        assert!(parse_callback("GET /oauth/callback?code=xyz&state=other HTTP/1.1\r\n", "s").unwrap().is_err());
-        let denied = parse_callback("GET /oauth/callback?error=access_denied&state=s HTTP/1.1\r\n", "s");
+        assert!(
+            parse_callback("GET /oauth/callback?code=xyz&state=other HTTP/1.1\r\n", "s")
+                .unwrap()
+                .is_err()
+        );
+        let denied = parse_callback(
+            "GET /oauth/callback?error=access_denied&state=s HTTP/1.1\r\n",
+            "s",
+        );
         assert!(matches!(denied.unwrap(), Err(AdapterError::BadCredentials)));
     }
 
@@ -244,8 +298,12 @@ mod tests {
     async fn serves_the_callback_page_end_to_end() {
         let waiting = tokio::spawn(wait_for_code("st", std::time::Duration::from_secs(5)));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", CALLBACK_PORT)).await.unwrap();
-        s.write_all(b"GET /oauth/callback?code=c0de&state=st HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").await.unwrap();
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", CALLBACK_PORT))
+            .await
+            .unwrap();
+        s.write_all(b"GET /oauth/callback?code=c0de&state=st HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .await
+            .unwrap();
         let mut page = String::new();
         s.read_to_string(&mut page).await.unwrap();
         assert!(page.contains("You're signed in"));

@@ -39,7 +39,13 @@ function spend(c: PlayerClock, secs: number) {
   const fromMain = Math.min(secs, c.main);
   c.main -= fromMain;
   secs -= fromMain;
-  if (secs <= 0 || c.periods == null || c.periodTime == null) return;
+  if (secs <= 0 || c.periodTime == null) return;
+  if (c.canadian) {
+    // One period for the block of stones; there is no next one.
+    c.periodLeft = Math.max(0, (c.periodLeft ?? c.periodTime) - secs);
+    return;
+  }
+  if (c.periods == null) return;
   let left = c.periodLeft ?? c.periodTime;
   let periods = c.periods;
   while (secs > 0 && periods > 0) {
@@ -62,6 +68,12 @@ function remaining(c: PlayerClock) {
 
 /** The big time, and a note about byo-yomi underneath it. */
 function describe(c: PlayerClock): [string, string] {
+  if (c.canadian) {
+    if (c.main > 0) return [mmss(c.main), c.periodTime ? `then ${mmss(c.periodTime)} for each block of stones` : ""];
+    const stones = c.periods;
+    const note = stones == null ? "overtime" : `${stones} ${stones === 1 ? "stone" : "stones"} to play in this period`;
+    return [mmss(c.periodLeft ?? c.periodTime ?? 0), note];
+  }
   const periods = c.periods ?? 0;
   const period = c.periodTime != null ? `${Math.round(c.periodTime)}s` : "";
   if (c.main > 0) {

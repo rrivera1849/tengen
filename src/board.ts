@@ -54,12 +54,15 @@ export class BoardView {
   private hover: [number, number] | null = null;
   private view: View | null = null;
   onPlay: (x: number, y: number) => void = () => {};
+  /** While scoring on servers where you mark dead stones yourself: a click on a stone. */
+  onMark: ((x: number, y: number) => void) | null = null;
 
   constructor(private svg: SVGSVGElement, private look: Look) {
     svg.addEventListener("pointermove", (e) => this.track(e));
     svg.addEventListener("pointerleave", () => this.setHover(null));
     svg.addEventListener("click", (e) => {
       const p = this.pointAt(e);
+      if (this.marking && p && this.occupied(p)) return this.onMark?.(p[0], p[1]);
       if (this.interactive && p && !this.occupied(p)) this.onPlay(p[0], p[1]);
     });
   }
@@ -95,6 +98,8 @@ export class BoardView {
 
   /** False while it's the opponent's turn in a live game, or during scoring. */
   interactive = true;
+  /** True while scoring, when clicking a stone marks its group dead or alive. */
+  marking = false;
 
   private estimate: Overlay | null = null;
   private line: Line | null = null;
@@ -112,6 +117,7 @@ export class BoardView {
   }
 
   private track(e: PointerEvent) {
+    this.svg.style.cursor = this.marking && this.pointAt(e) && this.occupied(this.pointAt(e)!) ? "pointer" : "";
     if (!this.interactive) return this.setHover(null);
     const p = this.pointAt(e);
     this.setHover(p && !this.occupied(p) ? p : null);
@@ -160,9 +166,6 @@ export class BoardView {
   /** The move played (a ring) and the better line, numbered from 1. */
   private ghostLine(l: Line) {
     const g = svg("g", { class: "better-line" });
-    if (l.played) {
-      g.append(svg("circle", { class: "played", cx: String(l.played[0]), cy: String(l.played[1]), r: "0.3" }));
-    }
     let color = l.color;
     const used = new Set<string>();
     l.line.forEach(([x, y], i) => {
@@ -180,6 +183,10 @@ export class BoardView {
       }
       color = color === "black" ? "white" : "black";
     });
+    // Last, so the move actually played stays visible over the AI's stones.
+    if (l.played) {
+      g.append(svg("circle", { class: "played", cx: String(l.played[0]), cy: String(l.played[1]), r: "0.3" }));
+    }
     return g;
   }
 

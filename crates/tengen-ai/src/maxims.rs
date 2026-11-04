@@ -27,7 +27,10 @@ impl Store {
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        Store { path: path.to_path_buf(), entries }
+        Store {
+            path: path.to_path_buf(),
+            entries,
+        }
     }
 
     pub fn save(&self) -> std::io::Result<()> {
@@ -75,7 +78,10 @@ impl Store {
         let ordinal = ["second", "third", "fourth", "fifth", "sixth"];
         (streak >= 2).then(|| {
             let nth = ordinal.get(streak - 1).copied().unwrap_or("latest");
-            format!("the {nth} game in a row with a {} lesson", kind.to_lowercase())
+            format!(
+                "the {nth} game in a row with a {} lesson",
+                kind.to_lowercase()
+            )
         })
     }
 
@@ -99,24 +105,50 @@ mod tests {
     use super::*;
 
     fn e(game: &str, kind: &str, maxim: &str) -> Entry {
-        Entry { date: "2026-11-04".into(), game: game.into(), kind: kind.into(), maxim: maxim.into() }
+        Entry {
+            date: "2026-11-04".into(),
+            game: game.into(),
+            kind: kind.into(),
+            maxim: maxim.into(),
+        }
     }
 
     #[test]
     fn notices_a_streak_and_keeps_games_once() {
         let mut s = Store::default();
-        s.record("g1", vec![e("g1", "Life and death", "Count eyes before attacking")]);
-        s.record("g2", vec![e("g2", "Life and death", "Secure your base first"), e("g2", "Tempo", "Tenuki when it's small")]);
-        assert_eq!(s.recurring("g3", "Life and death").as_deref(), Some("the third game in a row with a life and death lesson"));
+        s.record(
+            "g1",
+            vec![e("g1", "Life and death", "Count eyes before attacking")],
+        );
+        s.record(
+            "g2",
+            vec![
+                e("g2", "Life and death", "Secure your base first"),
+                e("g2", "Tempo", "Tenuki when it's small"),
+            ],
+        );
+        assert_eq!(
+            s.recurring("g3", "Life and death").as_deref(),
+            Some("the third game in a row with a life and death lesson")
+        );
         assert_eq!(s.recurring("g3", "Tempo"), None, "only one game");
         s.record("g2", vec![e("g2", "Tempo", "Tenuki when it's small")]);
-        assert_eq!(s.entries.len(), 2, "re-reviewing replaces the game's maxims");
-        assert_eq!(s.recent("g3", 5), vec!["Tenuki when it's small", "Count eyes before attacking"]);
+        assert_eq!(
+            s.entries.len(),
+            2,
+            "re-reviewing replaces the game's maxims"
+        );
+        assert_eq!(
+            s.recent("g3", 5),
+            vec!["Tenuki when it's small", "Count eyes before attacking"]
+        );
     }
 
     #[test]
     fn saves_and_loads() {
-        let path = std::env::temp_dir().join("tengen-maxims-test").join("maxims.json");
+        let path = std::env::temp_dir()
+            .join("tengen-maxims-test")
+            .join("maxims.json");
         let mut s = Store::load(&path);
         s.record("g", vec![e("g", "Endgame", "Play sente endgame first")]);
         s.save().unwrap();

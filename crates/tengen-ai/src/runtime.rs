@@ -52,13 +52,22 @@ pub struct ManifestFile {
 
 /// Finds a usable KataGo and network, writing the analysis config next to them.
 pub fn locate(dir: &Path) -> Option<Runtime> {
-    let env = |k: &str| std::env::var_os(k).map(PathBuf::from).filter(|p| p.exists());
+    let env = |k: &str| {
+        std::env::var_os(k)
+            .map(PathBuf::from)
+            .filter(|p| p.exists())
+    };
     let binary = env("TENGEN_KATAGO")
         .or_else(|| Some(dir.join("katago")).filter(|p| p.exists()))
         .or_else(|| HOMEBREW.iter().map(PathBuf::from).find(|p| p.exists()))?;
-    let model = env("TENGEN_KATAGO_MODEL").or_else(|| Some(dir.join("model.bin.gz")).filter(|p| p.exists()))?;
+    let model = env("TENGEN_KATAGO_MODEL")
+        .or_else(|| Some(dir.join("model.bin.gz")).filter(|p| p.exists()))?;
     let config = write_config(dir).ok()?;
-    Some(Runtime { binary, model, config })
+    Some(Runtime {
+        binary,
+        model,
+        config,
+    })
 }
 
 /// The analysis settings Tengen uses. Scores are always from Black's side.
@@ -81,7 +90,10 @@ pub fn config_text(log_dir: &Path, threads: usize) -> String {
 fn write_config(dir: &Path) -> std::io::Result<PathBuf> {
     let logs = dir.join("logs");
     std::fs::create_dir_all(&logs)?;
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 16);
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(2, 16);
     let path = dir.join("analysis.cfg");
     std::fs::write(&path, config_text(&logs, threads))?;
     Ok(path)
@@ -104,7 +116,9 @@ pub async fn install(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<R
         .json()
         .await
         .map_err(|e| AiError::Download(format!("the KataGo manifest is malformed: {e}")))?;
-    tokio::fs::create_dir_all(dir).await.map_err(|e| AiError::Download(e.to_string()))?;
+    tokio::fs::create_dir_all(dir)
+        .await
+        .map_err(|e| AiError::Download(e.to_string()))?;
 
     // Ask for sizes first so progress covers everything.
     let mut total = 0;
@@ -116,7 +130,10 @@ pub async fn install(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<R
     let mut done = 0;
     for f in &manifest.files {
         if f.name.contains('/') || f.name.contains("..") {
-            return Err(AiError::Download(format!("refusing a file named {}", f.name)));
+            return Err(AiError::Download(format!(
+                "refusing a file named {}",
+                f.name
+            )));
         }
         let target = dir.join(&f.name);
         let partial = dir.join(format!("{}.part", f.name));
@@ -126,22 +143,31 @@ pub async fn install(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<R
             .await
             .and_then(|r| r.error_for_status())
             .map_err(|e| AiError::Download(format!("{}: {e}", f.name)))?;
-        let mut file = tokio::fs::File::create(&partial).await.map_err(|e| AiError::Download(e.to_string()))?;
+        let mut file = tokio::fs::File::create(&partial)
+            .await
+            .map_err(|e| AiError::Download(e.to_string()))?;
         let mut hash = Sha256::new();
         let mut stream = resp.bytes_stream();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| AiError::Download(format!("{}: {e}", f.name)))?;
             hash.update(&chunk);
-            file.write_all(&chunk).await.map_err(|e| AiError::Download(e.to_string()))?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| AiError::Download(e.to_string()))?;
             done += chunk.len() as u64;
             progress(done, total);
         }
-        file.flush().await.map_err(|e| AiError::Download(e.to_string()))?;
+        file.flush()
+            .await
+            .map_err(|e| AiError::Download(e.to_string()))?;
         drop(file);
         let digest: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
         if !digest.eq_ignore_ascii_case(f.sha256.trim()) {
             let _ = tokio::fs::remove_file(&partial).await;
-            return Err(AiError::Download(format!("{} didn't match its checksum", f.name)));
+            return Err(AiError::Download(format!(
+                "{} didn't match its checksum",
+                f.name
+            )));
         }
         #[cfg(unix)]
         if f.executable {
@@ -153,11 +179,15 @@ pub async fn install(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<R
             unpack(&partial, dir).await?;
             let _ = tokio::fs::remove_file(&partial).await;
         } else {
-            tokio::fs::rename(&partial, &target).await.map_err(|e| AiError::Download(e.to_string()))?;
+            tokio::fs::rename(&partial, &target)
+                .await
+                .map_err(|e| AiError::Download(e.to_string()))?;
         }
     }
     let _ = &manifest.version;
-    locate(dir).ok_or_else(|| AiError::Download("the download finished but KataGo is still missing".into()))
+    locate(dir).ok_or_else(|| {
+        AiError::Download("the download finished but KataGo is still missing".into())
+    })
 }
 
 /// Unpacks a checked `.tar.gz` with the system's `tar`, refusing any entry
@@ -170,8 +200,14 @@ async fn unpack(archive: &Path, dir: &Path) -> Result<(), AiError> {
         .await
         .map_err(|e| AiError::Download(format!("couldn't read the KataGo archive: {e}")))?;
     let names = String::from_utf8_lossy(&list.stdout);
-    if !list.status.success() || names.lines().any(|n| n.starts_with('/') || n.split('/').any(|part| part == "..")) {
-        return Err(AiError::Download("the KataGo archive looks wrong; nothing was unpacked".into()));
+    if !list.status.success()
+        || names
+            .lines()
+            .any(|n| n.starts_with('/') || n.split('/').any(|part| part == ".."))
+    {
+        return Err(AiError::Download(
+            "the KataGo archive looks wrong; nothing was unpacked".into(),
+        ));
     }
     let out = tokio::process::Command::new("tar")
         .arg("-xzf")
@@ -182,7 +218,10 @@ async fn unpack(archive: &Path, dir: &Path) -> Result<(), AiError> {
         .await
         .map_err(|e| AiError::Download(e.to_string()))?;
     if !out.status.success() {
-        return Err(AiError::Download(format!("couldn't unpack KataGo: {}", String::from_utf8_lossy(&out.stderr).trim())));
+        return Err(AiError::Download(format!(
+            "couldn't unpack KataGo: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
     }
     Ok(())
 }
@@ -193,7 +232,10 @@ mod tests {
 
     #[test]
     fn config_reports_from_blacks_side() {
-        let text = config_text(Path::new("/Users/a b/Library/Application Support/Tengen/katago/logs"), 8);
+        let text = config_text(
+            Path::new("/Users/a b/Library/Application Support/Tengen/katago/logs"),
+            8,
+        );
         assert!(text.contains("reportAnalysisWinratesAs = BLACK"));
         assert!(text.contains("numSearchThreadsPerAnalysisThread = 8"));
     }
@@ -208,14 +250,26 @@ mod tests {
         std::fs::write(src.join("katago"), "bin").unwrap();
         std::fs::write(src.join("lib/libprotobuf.dylib"), "lib").unwrap();
         let good = root.join("good.tar.gz");
-        let ok = std::process::Command::new("tar").arg("-czf").arg(&good).arg("-C").arg(&src).args(["katago", "lib"]).status().unwrap();
+        let ok = std::process::Command::new("tar")
+            .arg("-czf")
+            .arg(&good)
+            .arg("-C")
+            .arg(&src)
+            .args(["katago", "lib"])
+            .status()
+            .unwrap();
         assert!(ok.success());
         unpack(&good, &dest).await.unwrap();
         assert!(dest.join("lib/libprotobuf.dylib").exists() && dest.join("katago").exists());
 
         // An entry with an absolute path (kept by -P) must be refused.
         let bad = root.join("bad.tar.gz");
-        let ok = std::process::Command::new("tar").arg("-czPf").arg(&bad).arg(src.join("katago")).status().unwrap();
+        let ok = std::process::Command::new("tar")
+            .arg("-czPf")
+            .arg(&bad)
+            .arg(src.join("katago"))
+            .status()
+            .unwrap();
         assert!(ok.success());
         assert!(unpack(&bad, &dest).await.is_err());
         let _ = std::fs::remove_dir_all(&root);

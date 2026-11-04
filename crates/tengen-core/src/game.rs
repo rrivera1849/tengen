@@ -51,12 +51,22 @@ pub struct Game {
 
 impl Game {
     pub fn new(size: u8, komi: f32) -> Self {
-        Self::from_info(GameInfo { size, komi, ..Default::default() })
+        Self::from_info(GameInfo {
+            size,
+            komi,
+            ..Default::default()
+        })
     }
 
     pub fn from_info(info: GameInfo) -> Self {
         let board = Self::setup_board(&info);
-        Game { info, comments: BTreeMap::new(), moves: Vec::new(), cursor: 0, board }
+        Game {
+            info,
+            comments: BTreeMap::new(),
+            moves: Vec::new(),
+            cursor: 0,
+            board,
+        }
     }
 
     pub fn board(&self) -> &Board {
@@ -200,7 +210,11 @@ mod tests {
 
     #[test]
     fn handicap_means_white_first() {
-        let mut info = GameInfo { size: 19, komi: 0.5, ..Default::default() };
+        let mut info = GameInfo {
+            size: 19,
+            komi: 0.5,
+            ..Default::default()
+        };
         info.setup_black = vec![Point::new(3, 3), Point::new(15, 15)];
         let g = Game::from_info(info);
         assert_eq!(g.to_move(), Color::White);

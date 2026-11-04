@@ -1,6 +1,6 @@
 //! The interface between Tengen and a Go server.
 //!
-//! Each server (OGS, Fox, later KGS, IGS, Tygem) gets one adapter crate that
+//! Each server (OGS, KGS, IGS, Fox) gets one adapter crate that
 //! translates its protocol into these shared types. The interface never
 //! exposes a server's wire format, so the UI treats every server the same.
 
@@ -18,6 +18,11 @@ pub enum Server {
     Ogs,
     #[serde(rename = "Fox")]
     Fox,
+    #[serde(rename = "KGS")]
+    Kgs,
+    /// Pandanet's Internet Go Server.
+    #[serde(rename = "IGS")]
+    Igs,
 }
 
 impl Server {
@@ -25,6 +30,8 @@ impl Server {
         match self {
             Server::Ogs => "OGS",
             Server::Fox => "Fox",
+            Server::Kgs => "KGS",
+            Server::Igs => "IGS",
         }
     }
 }
@@ -38,7 +45,9 @@ pub struct Credentials {
 
 impl std::fmt::Debug for Credentials {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Credentials").field("username", &self.username).finish_non_exhaustive()
+        f.debug_struct("Credentials")
+            .field("username", &self.username)
+            .finish_non_exhaustive()
     }
 }
 
@@ -85,11 +94,33 @@ pub enum Speed {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ServerEvent {
-    GameStarted { game_id: String, you: Color, black: String, white: String, size: u8, komi: f32 },
-    Moved { game_id: String, color: Color, mv: Move },
-    Clock { game_id: String, black_ms: u64, white_ms: u64, black_periods: Option<u8>, white_periods: Option<u8> },
-    GameEnded { game_id: String, result: String },
-    Disconnected { reason: String },
+    GameStarted {
+        game_id: String,
+        you: Color,
+        black: String,
+        white: String,
+        size: u8,
+        komi: f32,
+    },
+    Moved {
+        game_id: String,
+        color: Color,
+        mv: Move,
+    },
+    Clock {
+        game_id: String,
+        black_ms: u64,
+        white_ms: u64,
+        black_periods: Option<u8>,
+        white_periods: Option<u8>,
+    },
+    GameEnded {
+        game_id: String,
+        result: String,
+    },
+    Disconnected {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -115,16 +146,22 @@ pub enum AdapterError {
 pub trait ServerAdapter: Send + Sync {
     fn server(&self) -> Server;
 
-    fn sign_in(&mut self, credentials: &Credentials)
-        -> impl Future<Output = Result<Account, AdapterError>> + Send;
+    fn sign_in(
+        &mut self,
+        credentials: &Credentials,
+    ) -> impl Future<Output = Result<Account, AdapterError>> + Send;
 
     /// Recent games of a player, newest first.
-    fn recent_games(&self, player_id: &str)
-        -> impl Future<Output = Result<Vec<GameSummary>, AdapterError>> + Send;
+    fn recent_games(
+        &self,
+        player_id: &str,
+    ) -> impl Future<Output = Result<Vec<GameSummary>, AdapterError>> + Send;
 
     /// The full record of a game as SGF text, ready to save or load.
-    fn download_sgf(&self, game_id: &str)
-        -> impl Future<Output = Result<String, AdapterError>> + Send;
+    fn download_sgf(
+        &self,
+        game_id: &str,
+    ) -> impl Future<Output = Result<String, AdapterError>> + Send;
 }
 
 #[cfg(test)]
@@ -133,13 +170,22 @@ mod tests {
 
     #[test]
     fn credentials_never_print_the_password() {
-        let c = Credentials { username: "rafael".into(), password: "hunter2".into() };
+        let c = Credentials {
+            username: "rafael".into(),
+            password: "hunter2".into(),
+        };
         assert!(!format!("{c:?}").contains("hunter2"));
     }
 
     #[test]
     fn events_serialize_for_the_interface() {
-        let e = ServerEvent::GameEnded { game_id: "1".into(), result: "W+R".into() };
-        assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"type":"gameEnded","game_id":"1","result":"W+R"}"#);
+        let e = ServerEvent::GameEnded {
+            game_id: "1".into(),
+            result: "W+R".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&e).unwrap(),
+            r#"{"type":"gameEnded","game_id":"1","result":"W+R"}"#
+        );
     }
 }

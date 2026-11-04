@@ -25,18 +25,53 @@ const PING_EVERY: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum OgsEvent {
-    Authenticated { user_id: u64, username: String },
-    MatchStarted { uuid: String, game_id: u64 },
-    MatchCanceled { uuid: Option<String> },
-    GameData { game: Box<GameData> },
-    Moved { game_id: u64, move_number: usize, point: Option<Point> },
-    Clock { clock: ClockState },
-    Phase { game_id: u64, phase: String },
-    RemovedStones { game_id: u64, all_removed: String },
-    ScoreAccepted { game_id: u64, player_id: u64, phase: String, outcome: Option<String>, winner: Option<u64> },
-    GameError { game_id: u64, message: String },
-    Error { message: String },
-    Disconnected { reason: String },
+    Authenticated {
+        user_id: u64,
+        username: String,
+    },
+    MatchStarted {
+        uuid: String,
+        game_id: u64,
+    },
+    MatchCanceled {
+        uuid: Option<String>,
+    },
+    GameData {
+        game: Box<GameData>,
+    },
+    Moved {
+        game_id: u64,
+        move_number: usize,
+        point: Option<Point>,
+    },
+    Clock {
+        clock: ClockState,
+    },
+    Phase {
+        game_id: u64,
+        phase: String,
+    },
+    RemovedStones {
+        game_id: u64,
+        all_removed: String,
+    },
+    ScoreAccepted {
+        game_id: u64,
+        player_id: u64,
+        phase: String,
+        outcome: Option<String>,
+        winner: Option<u64>,
+    },
+    GameError {
+        game_id: u64,
+        message: String,
+    },
+    Error {
+        message: String,
+    },
+    Disconnected {
+        reason: String,
+    },
 }
 
 /// The full state of a game as OGS sends it (`game/<id>/gamedata`).
@@ -161,11 +196,23 @@ impl GameData {
             rules: self.rules.clone(),
             server: Some("OGS".into()),
             event: None,
-            setup_black: self.initial_state.as_ref().map(|s| setup(&s.black)).unwrap_or_default(),
-            setup_white: self.initial_state.as_ref().map(|s| setup(&s.white)).unwrap_or_default(),
+            setup_black: self
+                .initial_state
+                .as_ref()
+                .map(|s| setup(&s.black))
+                .unwrap_or_default(),
+            setup_white: self
+                .initial_state
+                .as_ref()
+                .map(|s| setup(&s.white))
+                .unwrap_or_default(),
         };
         let mut game = Game::from_info(info);
-        let first = if self.initial_player.as_deref() == Some("white") { Color::White } else { Color::Black };
+        let first = if self.initial_player.as_deref() == Some("white") {
+            Color::White
+        } else {
+            Color::Black
+        };
         // With free handicap placement black's handicap stones arrive as moves.
         let handicap_moves = match (self.handicap, self.free_handicap_placement) {
             (Some(h), Some(true)) if h > 1 => h as usize,
@@ -173,10 +220,20 @@ impl GameData {
         };
         let mut next = first;
         for (i, mv) in self.moves.iter().enumerate() {
-            let Some((point, explicit)) = packed_move(mv, size) else { continue };
-            let color = explicit.unwrap_or(if i < handicap_moves { Color::Black } else { next });
+            let Some((point, explicit)) = packed_move(mv, size) else {
+                continue;
+            };
+            let color = explicit.unwrap_or(if i < handicap_moves {
+                Color::Black
+            } else {
+                next
+            });
             game.play_record(color, point.map_or(Move::Pass, |p| Move::Play { point: p }));
-            next = if i + 1 < handicap_moves { Color::Black } else { color.opposite() };
+            next = if i + 1 < handicap_moves {
+                Color::Black
+            } else {
+                color.opposite()
+            };
         }
         game
     }
@@ -230,7 +287,12 @@ impl RawClock {
             _ => None,
         };
         let paused = self.paused_since.is_some()
-            || self.pause.as_ref().and_then(|p| p.get("paused")).and_then(Value::as_bool).unwrap_or(false);
+            || self
+                .pause
+                .as_ref()
+                .and_then(|p| p.get("paused"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
         // The times are as of the last move; take off what has elapsed since,
         // for the player whose turn it is.
         let elapsed = match (self.now, self.last_move) {
@@ -310,8 +372,13 @@ pub fn parse_frame(text: &str) -> Option<OgsEvent> {
             return None;
         }
         if let Some(err) = frame.get(2).filter(|e| !e.is_null()) {
-            let message = err.get("message").and_then(Value::as_str).unwrap_or("sign-in to the live server failed");
-            return Some(OgsEvent::Error { message: message.to_string() });
+            let message = err
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("sign-in to the live server failed");
+            return Some(OgsEvent::Error {
+                message: message.to_string(),
+            });
         }
         return Some(OgsEvent::Authenticated {
             user_id: data.get("id")?.as_u64()?,
@@ -333,24 +400,28 @@ pub fn parse_frame(text: &str) -> Option<OgsEvent> {
             let (id, event) = rest.split_once('/')?;
             let game_id: u64 = id.parse().ok()?;
             match event {
-                "gamedata" => serde_json::from_value::<GameData>(data)
-                    .ok()
-                    .map(|mut g| {
-                        g.game_id = game_id;
-                        OgsEvent::GameData { game: Box::new(g) }
-                    }),
+                "gamedata" => serde_json::from_value::<GameData>(data).ok().map(|mut g| {
+                    g.game_id = game_id;
+                    OgsEvent::GameData { game: Box::new(g) }
+                }),
                 "move" => {
                     let (point, _) = packed_move(data.get("move")?, 25)?;
                     Some(OgsEvent::Moved {
                         game_id,
-                        move_number: data.get("move_number").and_then(Value::as_u64).unwrap_or(0) as usize,
+                        move_number: data.get("move_number").and_then(Value::as_u64).unwrap_or(0)
+                            as usize,
                         point,
                     })
                 }
                 "clock" => serde_json::from_value::<RawClock>(data)
                     .ok()
-                    .map(|c| OgsEvent::Clock { clock: c.into_state() }),
-                "phase" => Some(OgsEvent::Phase { game_id, phase: data.as_str()?.to_string() }),
+                    .map(|c| OgsEvent::Clock {
+                        clock: c.into_state(),
+                    }),
+                "phase" => Some(OgsEvent::Phase {
+                    game_id,
+                    phase: data.as_str()?.to_string(),
+                }),
                 "removed_stones" => Some(OgsEvent::RemovedStones {
                     game_id,
                     all_removed: data.get("all_removed")?.as_str()?.to_string(),
@@ -358,8 +429,15 @@ pub fn parse_frame(text: &str) -> Option<OgsEvent> {
                 "removed_stones_accepted" => Some(OgsEvent::ScoreAccepted {
                     game_id,
                     player_id: data.get("player_id").and_then(Value::as_u64).unwrap_or(0),
-                    phase: data.get("phase").and_then(Value::as_str).unwrap_or("").to_string(),
-                    outcome: data.get("outcome").and_then(Value::as_str).map(str::to_string),
+                    phase: data
+                        .get("phase")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    outcome: data
+                        .get("outcome")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                     winner: data.get("winner").and_then(Value::as_u64),
                 }),
                 "error" => Some(OgsEvent::GameError {
@@ -417,7 +495,10 @@ pub fn decode_points(s: &str, size: u8) -> Vec<Point> {
 pub fn local_date_time_from_unix(secs: i64) -> (Option<String>, Option<String>) {
     use chrono::TimeZone;
     match chrono::Local.timestamp_opt(secs, 0).single() {
-        Some(t) => (Some(t.format("%Y-%m-%d").to_string()), Some(t.format("%H:%M").to_string())),
+        Some(t) => (
+            Some(t.format("%Y-%m-%d").to_string()),
+            Some(t.format("%H:%M").to_string()),
+        ),
         None => (None, None),
     }
 }
@@ -439,7 +520,11 @@ pub struct Realtime {
 impl Realtime {
     /// Opens the websocket, authenticates with the JWT from `/api/v1/ui/config`,
     /// and forwards everything OGS says to `events`.
-    pub async fn connect(base: &str, jwt: &str, events: mpsc::UnboundedSender<OgsEvent>) -> Result<Realtime, AdapterError> {
+    pub async fn connect(
+        base: &str,
+        jwt: &str,
+        events: mpsc::UnboundedSender<OgsEvent>,
+    ) -> Result<Realtime, AdapterError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let url = base.replacen("http", "ws", 1);
         let (socket, _) = tokio_tungstenite::connect_async(url.as_str())
@@ -568,7 +653,14 @@ fn new_uuid() -> String {
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
+    format!(
+        "{}-{}-{}-{}-{}",
+        &h[0..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..32]
+    )
 }
 
 #[cfg(test)]
@@ -579,7 +671,10 @@ mod tests {
     fn reads_the_authenticate_reply() {
         assert_eq!(
             parse_frame(r#"[1,{"id":42,"username":"rafael"}]"#),
-            Some(OgsEvent::Authenticated { user_id: 42, username: "rafael".into() })
+            Some(OgsEvent::Authenticated {
+                user_id: 42,
+                username: "rafael".into()
+            })
         );
         assert!(matches!(
             parse_frame(r#"[1,null,{"code":"invalid_jwt","message":"Invalid token"}]"#),
@@ -591,19 +686,33 @@ mod tests {
     fn reads_match_and_move_events() {
         assert_eq!(
             parse_frame(r#"["automatch/start",{"uuid":"u","game_id":77}]"#),
-            Some(OgsEvent::MatchStarted { uuid: "u".into(), game_id: 77 })
+            Some(OgsEvent::MatchStarted {
+                uuid: "u".into(),
+                game_id: 77
+            })
         );
         assert_eq!(
             parse_frame(r#"["game/77/move",{"game_id":77,"move_number":3,"move":[15,3,1234]}]"#),
-            Some(OgsEvent::Moved { game_id: 77, move_number: 3, point: Some(Point::new(15, 3)) })
+            Some(OgsEvent::Moved {
+                game_id: 77,
+                move_number: 3,
+                point: Some(Point::new(15, 3))
+            })
         );
         assert_eq!(
             parse_frame(r#"["game/77/move",{"game_id":77,"move_number":4,"move":[-1,-1,500]}]"#),
-            Some(OgsEvent::Moved { game_id: 77, move_number: 4, point: None })
+            Some(OgsEvent::Moved {
+                game_id: 77,
+                move_number: 4,
+                point: None
+            })
         );
         assert_eq!(
             parse_frame(r#"["game/77/phase","stone removal"]"#),
-            Some(OgsEvent::Phase { game_id: 77, phase: "stone removal".into() })
+            Some(OgsEvent::Phase {
+                game_id: 77,
+                phase: "stone removal".into()
+            })
         );
         assert_eq!(parse_frame(r#"["net/pong",{"client":1,"server":2}]"#), None);
         assert_eq!(parse_frame("not json"), None);
@@ -620,7 +729,9 @@ mod tests {
 
     #[test]
     fn turns_gamedata_into_a_record() {
-        let Some(OgsEvent::GameData { game }) = parse_frame(&sample_gamedata()) else { panic!("no gamedata") };
+        let Some(OgsEvent::GameData { game }) = parse_frame(&sample_gamedata()) else {
+            panic!("no gamedata")
+        };
         assert_eq!(game.color_of(42), Some(Color::Black));
         let g = game.to_game();
         assert_eq!(g.info.size, 9);
@@ -629,7 +740,15 @@ mod tests {
         assert_eq!(g.info.server.as_deref(), Some("OGS"));
         assert!(g.info.time.is_some());
         assert_eq!(g.moves().len(), 3);
-        assert_eq!(g.moves()[1], (Color::White, Move::Play { point: Point::new(2, 2) }));
+        assert_eq!(
+            g.moves()[1],
+            (
+                Color::White,
+                Move::Play {
+                    point: Point::new(2, 2)
+                }
+            )
+        );
         assert_eq!(g.to_move(), Color::White, "black passed last");
     }
 
@@ -662,7 +781,9 @@ mod tests {
             "last_move":1000000,"now":1010000,"expiration":0,
             "black_time":{"thinking_time":5,"periods":3,"period_time":30},
             "white_time":{"thinking_time":300,"periods":5,"period_time":30}}]"#;
-        let Some(OgsEvent::Clock { clock }) = parse_frame(frame) else { panic!("no clock") };
+        let Some(OgsEvent::Clock { clock }) = parse_frame(frame) else {
+            panic!("no clock")
+        };
         assert_eq!(clock.to_move, Some(Color::Black));
         // 10 s elapsed: 5 s of main time, then 5 s into the first period.
         assert_eq!(clock.black.main, 0.0);
@@ -673,7 +794,12 @@ mod tests {
 
     #[test]
     fn running_out_of_periods() {
-        let mut c = PlayerClock { main: 0.0, periods: Some(2), period_time: Some(10.0), period_left: None };
+        let mut c = PlayerClock {
+            main: 0.0,
+            periods: Some(2),
+            period_time: Some(10.0),
+            period_left: None,
+        };
         c.spend(25.0);
         assert_eq!((c.periods, c.period_left), (Some(0), Some(0.0)));
     }
@@ -682,7 +808,10 @@ mod tests {
     fn encodes_moves_like_goban() {
         assert_eq!(encode_move(Some(Point::new(15, 3))), "pd");
         assert_eq!(encode_move(None), "..");
-        assert_eq!(decode_points("pddpzz", 19), vec![Point::new(15, 3), Point::new(3, 15)]);
+        assert_eq!(
+            decode_points("pddpzz", 19),
+            vec![Point::new(15, 3), Point::new(3, 15)]
+        );
     }
 
     #[test]

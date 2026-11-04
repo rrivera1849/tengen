@@ -14,10 +14,11 @@ Early, but playable. What works today:
 - Open and save SGF files. Saves default to `~/Documents/kaya`, named like `2026-11-04 21.34 OGS Rafael (3d) vs Opponent (2k).sgf`
 - Load any OGS game by number or link, for review or to download its SGF
 - Sign in to OGS and play live: automatch on 9×9, 13×13 or 19×19 at blitz, rapid or live pace, with clocks, pass, resign and accepting the score
+- Sign in to KGS or Pandanet (IGS) with your name and password and play live the same way: 19×19 automatch, clocks (including Canadian overtime), and clicking dead stones while scoring
 - A score estimate on one key (E), from KataGo running on your Mac: the score, who owns what, and dead stones
 - An AI review (R) of any finished game: a score graph, up to five of your mistakes and three of your opponent's, each with KataGo's better line, a plain-language lesson from Claude, and a maxim to carry into your next game. Saved SGFs keep the lessons as comments
 
-Next up: Fox.
+KGS and Pandanet are new and haven't been tried against the real servers yet; expect a fix or two after the first games. Next up: Fox.
 
 ## Run it on your Mac
 
@@ -51,6 +52,15 @@ OGS signs apps in through the browser (OAuth2 with PKCE), so Tengen never sees y
 
 Then choose **Play online** (⌘L) and **Sign in with OGS**. Your browser opens OGS's sign-in page and hands control back to Tengen when you approve. The sign-in is kept in the macOS Keychain and renewed automatically; it lasts 30 days between uses.
 
+## Playing on KGS and Pandanet
+
+Both sign in with your account's name and password, which Tengen keeps in the macOS Keychain and sends only to that server. Choose **Play online** (⌘L), pick **KGS** or **Pandanet**, and sign in once; Tengen signs in again by itself on launch.
+
+- **KGS:** Tengen uses KGS's official [JSON API](https://www.gokgs.com/json/protocol.html). No account yet? At [gokgs.com](https://www.gokgs.com), enter as a guest, then choose **Register**; KGS emails you a password. KGS automatch is 19×19 only and for kyu players.
+- **Pandanet:** Tengen speaks the IGS text protocol at `igs.joyjoy.net:6969`, the same one desktop IGS clients use. Register at [pandanet-igs.com](https://www.pandanet.co.jp/English/register/index.htm). Pandanet's automatch ("seek") is 19×19 only; Blitz, Rapid and Live pick the shortest, middle and longest of the time settings it offers.
+
+When both players pass, click stones to mark them dead (click again to bring them back), then **Accept score**. On Pandanet, bringing stones back resets every stone marked so far, because that's how IGS works.
+
 ## Score estimate and AI review
 
 Both run on KataGo, the open-source Go engine, on your own Mac. KataGo decides what is true; Claude only explains it. Each lesson is written from a fact sheet Tengen has computed (the move, the better line, points lost, which groups lived or died), and Tengen checks every coordinate and number in it before you see it. A lesson that fails twice falls back to KataGo's facts alone.
@@ -70,7 +80,7 @@ Analyses and reviews are cached in Tengen's Application Support folder, so reope
 
 | Key | Does |
 | --- | --- |
-| Click | Place a stone |
+| Click | Place a stone; while scoring on KGS or Pandanet, mark a group dead or alive |
 | P | Pass |
 | E | Show or hide the score estimate |
 | R | Review the game |
@@ -91,11 +101,13 @@ src/                  Interface: TypeScript, drawn as SVG in the Mac web view
 src-tauri/            The app shell: a thin set of commands over the crates
 crates/tengen-core/   Board rules, game records, SGF, and the server-adapter interface
 crates/tengen-ogs/    Online-Go.com adapter: REST, sign-in (auth.rs) and live play (realtime.rs)
+crates/tengen-kgs/    KGS adapter: the JSON API over HTTP long polling
+crates/tengen-igs/    Pandanet adapter: the IGS text protocol over TCP
 crates/tengen-ai/     KataGo engine bridge, score estimate, lesson finder, Claude client and maxims
 crates/tengen-fox/    Fox adapter (protocol research not started)
 ```
 
-Every server plugs into the same `ServerAdapter` interface in `tengen-core`, so the interface never knows which server a game came from. Logins stay on your Mac, and connections go straight from your Mac to each server.
+Every server plugs into the interfaces in `tengen-core` (`ServerAdapter` for records, `LiveClient` and `LiveEvent` for live play), so the interface never knows which server a game came from. Each adapter keeps its protocol in a `protocol.rs` with no networking, tested line by line. Logins stay on your Mac, and connections go straight from your Mac to each server.
 
 ## Tests
 

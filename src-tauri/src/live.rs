@@ -50,6 +50,26 @@ pub struct LiveView {
     my_color: Option<Color>,
     phase: String,
     removed: Vec<(u8, u8)>,
+    /// True while scoring on a server where you click dead stones yourself.
+    mark_dead: bool,
+}
+
+impl LiveView {
+    pub fn new(
+        game_id: u64,
+        my_color: Option<Color>,
+        phase: &str,
+        removed: Vec<(u8, u8)>,
+        mark_dead: bool,
+    ) -> Self {
+        LiveView {
+            game_id,
+            my_color,
+            phase: phase.to_string(),
+            removed,
+            mark_dead,
+        }
+    }
 }
 
 impl Live {
@@ -59,7 +79,11 @@ impl Live {
             game_id: g.id,
             my_color: g.my_color,
             phase: g.phase.clone(),
-            removed: decode_points(&g.removed, g.size).into_iter().map(|p| (p.x, p.y)).collect(),
+            removed: decode_points(&g.removed, g.size)
+                .into_iter()
+                .map(|p| (p.x, p.y))
+                .collect(),
+            mark_dead: false,
         })
     }
 
@@ -72,13 +96,13 @@ impl Live {
 #[serde(rename_all = "camelCase")]
 pub struct OgsStatus {
     /// False until Tengen is registered with OGS (see the README).
-    configured: bool,
-    signed_in: bool,
-    connected: bool,
-    username: Option<String>,
-    rank: Option<String>,
-    searching: bool,
-    in_game: bool,
+    pub(crate) configured: bool,
+    pub(crate) signed_in: bool,
+    pub(crate) connected: bool,
+    pub(crate) username: Option<String>,
+    pub(crate) rank: Option<String>,
+    pub(crate) searching: bool,
+    pub(crate) in_game: bool,
 }
 
 pub fn status(state: &AppState) -> OgsStatus {
@@ -91,12 +115,22 @@ pub fn status(state: &AppState) -> OgsStatus {
         username: live.as_ref().map(|l| l.me.username.clone()),
         rank: live.as_ref().and_then(|l| l.me.rank.clone()),
         searching: live.as_ref().is_some_and(|l| l.searching.is_some()),
-        in_game: live.as_ref().is_some_and(|l| l.game.as_ref().is_some_and(|g| g.phase != "finished")),
+        in_game: live
+            .as_ref()
+            .is_some_and(|l| l.game.as_ref().is_some_and(|g| g.phase != "finished")),
     }
 }
 
 fn push_status(app: &AppHandle) {
-    let _ = app.emit("ogs", status(&app.state::<AppState>()));
+    crate::sessions::push_status(app);
+}
+
+/// True while an OGS game is being played or scored.
+pub fn in_game(state: &AppState) -> bool {
+    let live = state.live.lock().expect("live lock");
+    live.as_ref()
+        .and_then(|l| l.game.as_ref())
+        .is_some_and(|g| g.phase != "finished")
 }
 
 // ---------- signing in ----------
@@ -112,11 +146,16 @@ pub async fn sign_in(app: &AppHandle) -> Result<(), String> {
         let state = pkce.state.clone();
         async move { auth::wait_for_code(&state, Duration::from_secs(300)).await }
     });
-    app.opener().open_url(url, None::<&str>).map_err(|e| format!("couldn't open the browser: {e}"))?;
-    let code = waiting.await.map_err(|e| e.to_string())?.map_err(|e| match e {
-        AdapterError::BadCredentials => "Sign-in was cancelled on OGS".to_string(),
-        other => other.to_string(),
-    })?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| format!("couldn't open the browser: {e}"))?;
+    let code = waiting
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| match e {
+            AdapterError::BadCredentials => "Sign-in was cancelled on OGS".to_string(),
+            other => other.to_string(),
+        })?;
     let tokens = auth::exchange_code(ogs.http(), ogs.base_url(), client_id, &code, &pkce.verifier)
         .await
         .map_err(|e| e.to_string())?;
@@ -127,9 +166,13 @@ pub async fn sign_in(app: &AppHandle) -> Result<(), String> {
 
 /// On launch: reuse the sign-in saved in Keychain, renewing it if it's old.
 pub async fn resume(app: &AppHandle) {
-    let Some(mut tokens) = keychain::load_ogs() else { return push_status(app) };
+    let Some(mut tokens) = keychain::load_ogs() else {
+        return push_status(app);
+    };
     if tokens.needs_refresh() {
-        let (Some(client_id), ogs) = (auth::client_id(), app.state::<AppState>().ogs()) else { return };
+        let (Some(client_id), ogs) = (auth::client_id(), app.state::<AppState>().ogs()) else {
+            return;
+        };
         match auth::refresh(ogs.http(), ogs.base_url(), client_id, &tokens.refresh_token).await {
             Ok(t) => {
                 let _ = keychain::save_ogs(&t);
@@ -160,7 +203,11 @@ pub fn sign_out(app: &AppHandle, state: &AppState) {
 }
 
 fn set_token(app: &AppHandle, token: Option<String>) {
-    app.state::<AppState>().ogs.lock().expect("ogs lock").set_token(token);
+    app.state::<AppState>()
+        .ogs
+        .lock()
+        .expect("ogs lock")
+        .set_token(token);
 }
 
 // ---------- the connection ----------
@@ -174,11 +221,15 @@ async fn connect_now(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let ogs = state.ogs();
     let (me, jwt) = ogs.live_credentials().await.map_err(|e| match e {
-        AdapterError::NotSignedIn => "OGS didn't accept the saved sign-in. Sign in again.".to_string(),
+        AdapterError::NotSignedIn => {
+            "OGS didn't accept the saved sign-in. Sign in again.".to_string()
+        }
         other => other.to_string(),
     })?;
     let (tx, rx) = mpsc::unbounded_channel();
-    let rt = Realtime::connect(ogs.base_url(), &jwt, tx).await.map_err(|e| e.to_string())?;
+    let rt = Realtime::connect(ogs.base_url(), &jwt, tx)
+        .await
+        .map_err(|e| e.to_string())?;
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     {
         let mut live = state.live.lock().expect("live lock");
@@ -187,7 +238,14 @@ async fn connect_now(app: &AppHandle) -> Result<(), String> {
         if let Some(g) = &game {
             rt.join_game(g.id);
         }
-        *live = Some(Live { rt, me, connected: true, searching: None, game, generation });
+        *live = Some(Live {
+            rt,
+            me,
+            connected: true,
+            searching: None,
+            game,
+            generation,
+        });
     }
     tauri::async_runtime::spawn(listen(app.clone(), rx, generation));
     push_status(app);
@@ -222,14 +280,19 @@ async fn reconnect(app: AppHandle, generation: u64, reason: String) {
     notify(&app, "Lost the connection to OGS. Reconnecting");
     for wait in [2, 4, 8, 15, 30] {
         tokio::time::sleep(Duration::from_secs(wait)).await;
-        if GENERATION.load(Ordering::SeqCst) != generation || !app.state::<AppState>().ogs().is_signed_in() {
+        if GENERATION.load(Ordering::SeqCst) != generation
+            || !app.state::<AppState>().ogs().is_signed_in()
+        {
             return;
         }
         if connect(&app).await.is_ok() {
             return notify(&app, "Reconnected to OGS");
         }
     }
-    notify(&app, format!("Couldn't reconnect to OGS ({reason}). Check your connection."));
+    notify(
+        &app,
+        format!("Couldn't reconnect to OGS ({reason}). Check your connection."),
+    );
 }
 
 fn handle(app: &AppHandle, event: OgsEvent) {
@@ -245,6 +308,7 @@ fn handle(app: &AppHandle, event: OgsEvent) {
                     return; // a request from another device
                 }
                 l.searching = None;
+                crate::sessions::close_game(&state);
                 l.game = Some(LiveGame {
                     id: game_id,
                     my_color: None,
@@ -274,7 +338,9 @@ fn handle(app: &AppHandle, event: OgsEvent) {
                 let mut live = state.live.lock().expect("live lock");
                 let Some(l) = live.as_mut() else { return };
                 let me = l.my_id();
-                let Some(g) = l.game.as_mut().filter(|g| g.id == data.game_id) else { return };
+                let Some(g) = l.game.as_mut().filter(|g| g.id == data.game_id) else {
+                    return;
+                };
                 g.my_color = data.color_of(me);
                 g.phase = data.phase.clone().unwrap_or_else(|| "play".into());
                 g.removed = removed_string(&data);
@@ -299,18 +365,37 @@ fn handle(app: &AppHandle, event: OgsEvent) {
         OgsEvent::Moved { game_id, point, .. } => {
             {
                 let live = state.live.lock().expect("live lock");
-                let Some(g) = live.as_ref().and_then(|l| l.game.as_ref()).filter(|g| g.id == game_id) else { return };
+                let Some(g) = live
+                    .as_ref()
+                    .and_then(|l| l.game.as_ref())
+                    .filter(|g| g.id == game_id)
+                else {
+                    return;
+                };
                 let mut game = state.game.lock().expect("game lock");
                 let total = game.moves().len();
                 game.go_to(total);
-                let color = if total < g.handicap_moves { Color::Black } else { game.to_move() };
-                game.play_record(color, point.map_or(Move::Pass, |point| Move::Play { point }));
+                let color = if total < g.handicap_moves {
+                    Color::Black
+                } else {
+                    game.to_move()
+                };
+                game.play_record(
+                    color,
+                    point.map_or(Move::Pass, |point| Move::Play { point }),
+                );
             }
             push_view(app);
         }
 
         OgsEvent::Clock { clock } => {
-            let open = state.live.lock().expect("live lock").as_ref().and_then(|l| l.game.as_ref()).map(|g| g.id);
+            let open = state
+                .live
+                .lock()
+                .expect("live lock")
+                .as_ref()
+                .and_then(|l| l.game.as_ref())
+                .map(|g| g.id);
             if open == Some(clock.game_id) {
                 let _ = app.emit("clock", clock);
             }
@@ -324,22 +409,36 @@ fn handle(app: &AppHandle, event: OgsEvent) {
             push_view(app);
             push_status(app);
             if entering_scoring {
-                notify(app, "Both passed. Check the dead stones, then accept the score");
+                notify(
+                    app,
+                    "Both passed. Check the dead stones, then accept the score",
+                );
             }
         }
 
-        OgsEvent::RemovedStones { game_id, all_removed } => {
+        OgsEvent::RemovedStones {
+            game_id,
+            all_removed,
+        } => {
             if set_game(&state, game_id, |g| g.removed = all_removed) {
                 push_view(app);
             }
         }
 
-        OgsEvent::ScoreAccepted { game_id, phase, outcome, winner, .. } => {
+        OgsEvent::ScoreAccepted {
+            game_id,
+            phase,
+            outcome,
+            winner,
+            ..
+        } => {
             let mut winner_color = None;
             let ok = set_game(&state, game_id, |g| {
                 g.phase = phase.clone();
                 winner_color = winner.and_then(|w| {
-                    (w == g.black_id).then_some(Color::Black).or((w == g.white_id).then_some(Color::White))
+                    (w == g.black_id)
+                        .then_some(Color::Black)
+                        .or((w == g.white_id).then_some(Color::White))
                 });
             });
             if !ok {
@@ -366,7 +465,11 @@ fn handle(app: &AppHandle, event: OgsEvent) {
 /// Applies `f` to the open live game if it is `game_id`. Returns whether it was.
 fn set_game(state: &AppState, game_id: u64, f: impl FnOnce(&mut LiveGame)) -> bool {
     let mut live = state.live.lock().expect("live lock");
-    match live.as_mut().and_then(|l| l.game.as_mut()).filter(|g| g.id == game_id) {
+    match live
+        .as_mut()
+        .and_then(|l| l.game.as_mut())
+        .filter(|g| g.id == game_id)
+    {
         Some(g) => {
             f(g);
             true
@@ -387,7 +490,10 @@ fn announce_result(app: &AppHandle) {
     let (result, mine) = {
         let game = state.game.lock().expect("game lock");
         let live = state.live.lock().expect("live lock");
-        let mine = live.as_ref().and_then(|l| l.game.as_ref()).and_then(|g| g.my_color);
+        let mine = live
+            .as_ref()
+            .and_then(|l| l.game.as_ref())
+            .and_then(|g| g.my_color);
         (game.info.result.clone(), mine)
     };
     let Some(result) = result else { return };
@@ -396,19 +502,25 @@ fn announce_result(app: &AppHandle) {
         (Some('B'), Some(Color::White)) | (Some('W'), Some(Color::Black)) => Some(false),
         _ => None,
     };
-    notify(app, match won {
-        Some(true) => format!("You won, {result}"),
-        Some(false) => format!("You lost, {result}"),
-        None => format!("Game over, {result}"),
-    });
+    notify(
+        app,
+        match won {
+            Some(true) => format!("You won, {result}"),
+            Some(false) => format!("You lost, {result}"),
+            None => format!("Game over, {result}"),
+        },
+    );
 }
 
 // ---------- automatch ----------
 
 pub fn find_match(app: &AppHandle, state: &AppState, size: u8, speed: Speed) -> Result<(), String> {
     let mut live = state.live.lock().expect("live lock");
-    let l = live.as_mut().filter(|l| l.connected).ok_or("Sign in to OGS to play online")?;
-    if l.game.as_ref().is_some_and(|g| g.phase != "finished") {
+    let l = live
+        .as_mut()
+        .filter(|l| l.connected)
+        .ok_or("Sign in to OGS to play online")?;
+    if l.game.as_ref().is_some_and(|g| g.phase != "finished") || crate::sessions::in_game(state) {
         return Err("You're already in a game".into());
     }
     if let Some(old) = l.searching.take() {

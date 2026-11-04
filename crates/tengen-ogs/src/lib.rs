@@ -35,7 +35,11 @@ impl OgsAdapter {
             .user_agent(concat!("Tengen/", env!("CARGO_PKG_VERSION")))
             .build()
             .expect("HTTP client");
-        OgsAdapter { base: base_url.trim_end_matches('/').to_string(), http, token: None }
+        OgsAdapter {
+            base: base_url.trim_end_matches('/').to_string(),
+            http,
+            token: None,
+        }
     }
 
     /// Uses an OAuth2 access token obtained elsewhere.
@@ -76,14 +80,26 @@ impl OgsAdapter {
             .send()
             .await
             .map_err(net)?;
-        if resp.status() == reqwest::StatusCode::UNAUTHORIZED || resp.status() == reqwest::StatusCode::FORBIDDEN {
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED
+            || resp.status() == reqwest::StatusCode::FORBIDDEN
+        {
             return Err(AdapterError::NotSignedIn);
         }
-        let cfg: UiConfig = resp.error_for_status().map_err(net)?.json().await.map_err(proto)?;
+        let cfg: UiConfig = resp
+            .error_for_status()
+            .map_err(net)?
+            .json()
+            .await
+            .map_err(proto)?;
         let (Some(jwt), Some(user)) = (cfg.user_jwt.filter(|j| !j.is_empty()), cfg.user) else {
             return Err(AdapterError::NotSignedIn);
         };
-        let account = Account { server: Server::Ogs, id: user.id.to_string(), username: user.username, rank: user.ranking.map(rank_name) };
+        let account = Account {
+            server: Server::Ogs,
+            id: user.id.to_string(),
+            username: user.username,
+            rank: user.ranking.map(rank_name),
+        };
         Ok((account, jwt))
     }
 
@@ -93,8 +109,18 @@ impl OgsAdapter {
         struct Detail {
             started: Option<String>,
         }
-        let resp = self.http.get(format!("{}/api/v1/games/{}", self.base, game_id.trim())).send().await.ok()?;
-        resp.error_for_status().ok()?.json::<Detail>().await.ok()?.started
+        let resp = self
+            .http
+            .get(format!("{}/api/v1/games/{}", self.base, game_id.trim()))
+            .send()
+            .await
+            .ok()?;
+        resp.error_for_status()
+            .ok()?
+            .json::<Detail>()
+            .await
+            .ok()?
+            .started
     }
 
     /// The signed-in account, read from `/api/v1/me/`.
@@ -110,7 +136,12 @@ impl OgsAdapter {
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
             return Err(AdapterError::NotSignedIn);
         }
-        let me: OgsPlayer = resp.error_for_status().map_err(net)?.json().await.map_err(proto)?;
+        let me: OgsPlayer = resp
+            .error_for_status()
+            .map_err(net)?
+            .json()
+            .await
+            .map_err(proto)?;
         Ok(Account {
             server: Server::Ogs,
             id: me.id.to_string(),
@@ -139,23 +170,46 @@ impl ServerAdapter for OgsAdapter {
     }
 
     async fn recent_games(&self, player_id: &str) -> Result<Vec<GameSummary>, AdapterError> {
-        let url = format!("{}/api/v1/players/{}/games/?ordering=-ended", self.base, player_id.trim());
+        let url = format!(
+            "{}/api/v1/players/{}/games/?ordering=-ended",
+            self.base,
+            player_id.trim()
+        );
         let resp = self.http.get(url).send().await.map_err(net)?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(AdapterError::Protocol(format!("player {player_id} not found")));
+            return Err(AdapterError::Protocol(format!(
+                "player {player_id} not found"
+            )));
         }
-        let page: Page = resp.error_for_status().map_err(net)?.json().await.map_err(proto)?;
+        let page: Page = resp
+            .error_for_status()
+            .map_err(net)?
+            .json()
+            .await
+            .map_err(proto)?;
         Ok(page.results.into_iter().map(OgsGame::summary).collect())
     }
 
     async fn download_sgf(&self, game_id: &str) -> Result<String, AdapterError> {
-        let resp = self.http.get(self.sgf_url(game_id)).send().await.map_err(net)?;
+        let resp = self
+            .http
+            .get(self.sgf_url(game_id))
+            .send()
+            .await
+            .map_err(net)?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(AdapterError::GameNotFound(game_id.to_string()));
         }
-        let text = resp.error_for_status().map_err(net)?.text().await.map_err(net)?;
+        let text = resp
+            .error_for_status()
+            .map_err(net)?
+            .text()
+            .await
+            .map_err(net)?;
         if !text.trim_start().starts_with('(') {
-            return Err(AdapterError::Protocol("response was not an SGF record".into()));
+            return Err(AdapterError::Protocol(
+                "response was not an SGF record".into(),
+            ));
         }
         Ok(text)
     }
@@ -224,7 +278,8 @@ struct OgsName {
 impl OgsGame {
     fn summary(self) -> GameSummary {
         let name = |p: Option<&OgsName>, fallback: &str| {
-            p.map(|p| p.username.clone()).unwrap_or_else(|| fallback.to_string())
+            p.map(|p| p.username.clone())
+                .unwrap_or_else(|| fallback.to_string())
         };
         let winner = match (self.black_lost, self.white_lost) {
             (Some(false), Some(true)) => Some("B"),
@@ -239,8 +294,14 @@ impl OgsGame {
         GameSummary {
             server: Server::Ogs,
             id: self.id.to_string(),
-            black: name(self.players.as_ref().and_then(|p| p.black.as_ref()), "Black"),
-            white: name(self.players.as_ref().and_then(|p| p.white.as_ref()), "White"),
+            black: name(
+                self.players.as_ref().and_then(|p| p.black.as_ref()),
+                "Black",
+            ),
+            white: name(
+                self.players.as_ref().and_then(|p| p.white.as_ref()),
+                "White",
+            ),
             size: self.width.unwrap_or(19),
             result,
             started: self.started,
@@ -263,15 +324,24 @@ mod tests {
     #[test]
     fn reads_game_links_and_ids() {
         assert_eq!(parse_game_ref("12345").as_deref(), Some("12345"));
-        assert_eq!(parse_game_ref("https://online-go.com/game/76543210/").as_deref(), Some("76543210"));
-        assert_eq!(parse_game_ref("https://online-go.com/game/view/42").as_deref(), Some("42"));
+        assert_eq!(
+            parse_game_ref("https://online-go.com/game/76543210/").as_deref(),
+            Some("76543210")
+        );
+        assert_eq!(
+            parse_game_ref("https://online-go.com/game/view/42").as_deref(),
+            Some("42")
+        );
         assert_eq!(parse_game_ref("not a game"), None);
     }
 
     #[test]
     fn builds_the_sgf_url() {
         let a = OgsAdapter::new("https://online-go.com/");
-        assert_eq!(a.sgf_url(" 42 "), "https://online-go.com/api/v1/games/42/sgf");
+        assert_eq!(
+            a.sgf_url(" 42 "),
+            "https://online-go.com/api/v1/games/42/sgf"
+        );
     }
 
     #[test]
@@ -289,7 +359,10 @@ mod tests {
         )
         .unwrap();
         let s = page.results.into_iter().next().unwrap().summary();
-        assert_eq!((s.black.as_str(), s.white.as_str(), s.result.as_deref()), ("rafael", "bot", Some("B+R")));
+        assert_eq!(
+            (s.black.as_str(), s.white.as_str(), s.result.as_deref()),
+            ("rafael", "bot", Some("B+R"))
+        );
     }
 
     /// Hits the real server: `cargo test -p tengen-ogs -- --ignored`.

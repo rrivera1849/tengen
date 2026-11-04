@@ -56,7 +56,13 @@ impl Board {
     pub fn new(size: u8) -> Self {
         assert!((2..=25).contains(&size), "board size must be 2..=25");
         let n = size as usize * size as usize;
-        Board { size, cells: vec![None; n], ko: None, captures_black: 0, captures_white: 0 }
+        Board {
+            size,
+            cells: vec![None; n],
+            ko: None,
+            captures_black: 0,
+            captures_white: 0,
+        }
     }
 
     pub fn size(&self) -> u8 {
@@ -137,7 +143,9 @@ impl Board {
     }
 
     pub fn group(&self, start: Point) -> Vec<Point> {
-        let Some(color) = self.get(start) else { return Vec::new() };
+        let Some(color) = self.get(start) else {
+            return Vec::new();
+        };
         let mut seen = vec![false; self.cells.len()];
         let mut stack = vec![start];
         let mut out = Vec::new();
@@ -169,7 +177,12 @@ impl Board {
     pub fn stones(&self) -> impl Iterator<Item = (Point, Color)> + '_ {
         let size = self.size;
         self.cells.iter().enumerate().filter_map(move |(i, c)| {
-            c.map(|c| (Point::new((i % size as usize) as u8, (i / size as usize) as u8), c))
+            c.map(|c| {
+                (
+                    Point::new((i % size as usize) as u8, (i / size as usize) as u8),
+                    c,
+                )
+            })
         })
     }
 
@@ -221,8 +234,12 @@ mod tests {
         // Classic ko shape around (1,1)/(2,1).
         let mut b = Board::new(9);
         for (x, y, c) in [
-            (1, 0, Color::Black), (0, 1, Color::Black), (1, 2, Color::Black),
-            (2, 0, Color::White), (3, 1, Color::White), (2, 2, Color::White),
+            (1, 0, Color::Black),
+            (0, 1, Color::Black),
+            (1, 2, Color::Black),
+            (2, 0, Color::White),
+            (3, 1, Color::White),
+            (2, 2, Color::White),
             (2, 1, Color::Black),
         ] {
             b.play(p(x, y), c).unwrap();

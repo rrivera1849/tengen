@@ -1,6 +1,6 @@
 import "@fontsource-variable/fraunces/opsz.css";
 import "@fontsource-variable/fraunces/opsz-italic.css";
-import { api, onEvents, previewClock, type Color, type OgsStatus, type Speed, type View } from "./api";
+import { api, onEvents, previewClock, type Color, type ServerName, type ServerStatus, type Speed, type View } from "./api";
 import { BoardView, type Look, type StoneStyle, type Texture } from "./board";
 import { setClock } from "./clock";
 import * as panel from "./review";
@@ -10,10 +10,11 @@ interface Settings extends Look {
   sound: boolean;
   matchSize: number;
   matchSpeed: Speed;
+  matchServer: ServerName;
 }
 
 const DEFAULTS: Settings = {
-  texture: "kaya", stones: "shell", coords: false, sound: true, matchSize: 19, matchSpeed: "rapid",
+  texture: "kaya", stones: "shell", coords: false, sound: true, matchSize: 19, matchSpeed: "rapid", matchServer: "OGS",
 };
 
 function loadSettings(): Settings {
@@ -37,7 +38,7 @@ const dialog = (id: string) => $<HTMLDialogElement>(`#${id}`);
 
 let settings = loadSettings();
 let view: View | null = null;
-let ogs: OgsStatus | null = null;
+let servers: ServerStatus[] = [];
 const board = new BoardView($("#board") as unknown as SVGSVGElement, settings);
 
 // ---------- rendering ----------
@@ -67,6 +68,7 @@ function show(v: View) {
   panel.setCursor(v.cursor);
   const m = mode(v);
   board.interactive = m === "review" || (m === "live" && v.toMove === v.live?.myColor);
+  board.marking = m === "scoring" && !!v.live?.markDead;
   board.update(v);
   if (placed && settings.sound) click();
 
@@ -253,9 +255,14 @@ function meta(rank: string | null, captures: number, ...extra: (string | null)[]
   return [rank, captures ? `${captures} captured` : null, ...extra].filter(Boolean).join(", ");
 }
 
-function showOgs(s: OgsStatus) {
-  ogs = s;
-  $("#searching").hidden = !s.searching;
+/** What each server is called in the interface. */
+const SERVER_LABEL: Record<ServerName, string> = { OGS: "OGS", KGS: "KGS", IGS: "Pandanet" };
+
+function showServers(list: ServerStatus[]) {
+  servers = list;
+  const looking = list.find((s) => s.searching);
+  $("#searching").hidden = !looking;
+  if (looking) $("#searching-text").textContent = `Looking for an opponent on ${SERVER_LABEL[looking.server]}`;
 }
 
 let noticeTimer = 0;
@@ -289,6 +296,7 @@ function explain(e: unknown) {
 // ---------- actions ----------
 
 board.onPlay = (x, y) => runView(() => api.play(x, y));
+board.onMark = (x, y) => runView(() => api.play(x, y));
 
 const actions: Record<string, () => void> = {
   new: () => dialog("new-dialog").showModal(),
@@ -307,7 +315,7 @@ const actions: Record<string, () => void> = {
   resign: () => dialog("resign-dialog").showModal(),
   accept: () => run(api.acceptScore, () => notify("Score accepted. Waiting for your opponent")),
   leave: () => runView(api.leaveGame),
-  "cancel-match": () => run(api.cancelMatch, showOgs),
+  "cancel-match": () => run(api.cancelMatch, showServers),
   look: () => {
     syncLookDialog();
     dialog("look-dialog").showModal();
@@ -352,59 +360,106 @@ const SPEED_HINTS: Record<Speed, string> = {
   live: "The most thinking time of the three.",
 };
 
+/** Board sizes each server's automatch offers. */
+const AUTOMATCH_SIZES: Record<ServerName, number[]> = { OGS: [9, 13, 19], KGS: [19], IGS: [19] };
+
+const SIGN_UP: Record<ServerName, string> = {
+  OGS: "",
+  KGS: "Kept in your Mac's Keychain. No KGS account yet? At gokgs.com, enter as a guest, then choose Register.",
+  IGS: "Kept in your Mac's Keychain. No Pandanet account yet? Register at pandanet-igs.com.",
+};
+
 async function openOnline() {
-  await run(api.ogsStatus, showOgs);
-  const s = ogs;
+  await run(api.serverStatus, showServers);
+  syncOnline();
+  dialog("online-dialog").showModal();
+}
+
+function syncOnline() {
+  const server = settings.matchServer;
+  const s = servers.find((x) => x.server === server);
   const signedIn = !!s?.signedIn;
+  const browser = server === "OGS";
   document.querySelectorAll<HTMLElement>("#online-dialog [data-when]").forEach((el) => {
     el.hidden = el.dataset.when !== (signedIn ? "signed-in" : "signed-out");
   });
-  $("#not-configured").hidden = !!s?.configured;
-  $<HTMLButtonElement>("#sign-in").disabled = !s?.configured;
+  document.querySelectorAll<HTMLElement>("#online-dialog [data-auth]").forEach((el) => {
+    el.hidden = el.dataset.auth !== (browser ? "browser" : "password");
+  });
+  $("#not-configured").hidden = !browser || !!s?.configured;
+  const signIn = $<HTMLButtonElement>("#sign-in");
+  signIn.disabled = browser && !s?.configured;
+  signIn.textContent = browser ? "Sign in with OGS" : `Sign in to ${SERVER_LABEL[server]}`;
+  $("#login-hint").textContent = SIGN_UP[server];
   $("#account-name").textContent = s?.username
     ? `Signed in as ${s.username}${s.rank ? ` (${s.rank})` : ""}${s.connected ? "" : ", reconnecting"}`
     : "Signed in";
   syncPicks();
-  dialog("online-dialog").showModal();
 }
 
 function syncPicks() {
+  const sizes = AUTOMATCH_SIZES[settings.matchServer];
+  if (!sizes.includes(settings.matchSize)) settings.matchSize = 19;
   document.querySelectorAll<HTMLElement>("#online-dialog [data-pick]").forEach((group) => {
-    const current = group.dataset.pick === "size" ? String(settings.matchSize) : settings.matchSpeed;
+    const pick = group.dataset.pick;
+    const current = pick === "size" ? String(settings.matchSize) : pick === "speed" ? settings.matchSpeed : settings.matchServer;
     group.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
       b.setAttribute("aria-pressed", String(b.value === current));
+      if (pick === "size") b.disabled = !sizes.includes(Number(b.value));
     });
   });
-  $("#speed-hint").textContent = SPEED_HINTS[settings.matchSpeed];
+  const only19 = sizes.length === 1 ? ` ${SERVER_LABEL[settings.matchServer]} automatch plays 19\u00a0×\u00a019 only.` : "";
+  $("#speed-hint").textContent = SPEED_HINTS[settings.matchSpeed] + only19;
 }
 
 document.querySelectorAll<HTMLElement>("#online-dialog [data-pick]").forEach((group) => {
   group.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest("button");
-    if (!b) return;
+    if (!b || b.disabled) return;
     e.preventDefault();
     if (group.dataset.pick === "size") settings.matchSize = Number(b.value);
-    else settings.matchSpeed = b.value as Speed;
+    else if (group.dataset.pick === "speed") settings.matchSpeed = b.value as Speed;
+    else settings.matchServer = b.value as ServerName;
     saveSettings(settings);
-    syncPicks();
+    syncOnline();
   });
+});
+
+// Return in the password field signs in (the form's first button is Cancel).
+$("#login-password").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  dialog("online-dialog").close("sign-in");
 });
 
 dialog("online-dialog").addEventListener("close", (e) => {
   const choice = (e.target as HTMLDialogElement).returnValue;
-  if (choice === "sign-in") {
+  const server = settings.matchServer;
+  const name = SERVER_LABEL[server];
+  const password = $<HTMLInputElement>("#login-password");
+  if (choice === "sign-in" && server === "OGS") {
     notify("Finish signing in in your browser");
-    run(api.signIn, (s) => {
-      showOgs(s);
-      notify(`Signed in as ${s.username ?? "you"}`);
+    run(api.ogsSignIn, (list) => {
+      showServers(list);
+      notify(`Signed in to OGS`);
+      openOnline();
+    });
+  } else if (choice === "sign-in") {
+    const username = $<HTMLInputElement>("#login-name").value.trim();
+    const secret = password.value;
+    notify(`Signing in to ${name}`);
+    run(() => api.signIn(server, username, secret), (list) => {
+      showServers(list);
+      notify(`Signed in to ${name}`);
       openOnline();
     });
   }
-  if (choice === "sign-out") run(api.signOut, (s) => {
-    showOgs(s);
-    notify("Signed out of OGS");
+  password.value = "";
+  if (choice === "sign-out") run(() => api.signOut(server), (list) => {
+    showServers(list);
+    notify(`Signed out of ${name}`);
   });
-  if (choice === "find") run(() => api.findMatch(settings.matchSize, settings.matchSpeed), showOgs);
+  if (choice === "find") run(() => api.findMatch(server, settings.matchSize, settings.matchSpeed), showServers);
 });
 
 // ---------- board settings ----------
@@ -480,7 +535,7 @@ window.addEventListener("keydown", (e) => {
 
 onEvents({
   view: show,
-  ogs: showOgs,
+  servers: showServers,
   clock: (c) => (view?.live?.gameId === c.gameId ? setClock(c) : undefined),
   notice: notify,
   progress: (p) => {
@@ -496,4 +551,4 @@ runView(api.current).then(() => {
   const sample = previewClock();
   if (sample) setClock(sample);
 });
-run(api.ogsStatus, showOgs);
+run(api.serverStatus, showServers);
