@@ -45,6 +45,9 @@ pub struct ManifestFile {
     pub sha256: String,
     #[serde(default)]
     pub executable: bool,
+    /// A `.tar.gz` to unpack into the KataGo folder (KataGo and its libraries).
+    #[serde(default)]
+    pub archive: bool,
 }
 
 /// Finds a usable KataGo and network, writing the analysis config next to them.
@@ -146,10 +149,42 @@ pub async fn install(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<R
             std::fs::set_permissions(&partial, std::fs::Permissions::from_mode(0o755))
                 .map_err(|e| AiError::Download(e.to_string()))?;
         }
-        tokio::fs::rename(&partial, &target).await.map_err(|e| AiError::Download(e.to_string()))?;
+        if f.archive {
+            unpack(&partial, dir).await?;
+            let _ = tokio::fs::remove_file(&partial).await;
+        } else {
+            tokio::fs::rename(&partial, &target).await.map_err(|e| AiError::Download(e.to_string()))?;
+        }
     }
     let _ = &manifest.version;
     locate(dir).ok_or_else(|| AiError::Download("the download finished but KataGo is still missing".into()))
+}
+
+/// Unpacks a checked `.tar.gz` with the system's `tar`, refusing any entry
+/// that would land outside `dir`.
+async fn unpack(archive: &Path, dir: &Path) -> Result<(), AiError> {
+    let list = tokio::process::Command::new("tar")
+        .arg("-tzf")
+        .arg(archive)
+        .output()
+        .await
+        .map_err(|e| AiError::Download(format!("couldn't read the KataGo archive: {e}")))?;
+    let names = String::from_utf8_lossy(&list.stdout);
+    if !list.status.success() || names.lines().any(|n| n.starts_with('/') || n.split('/').any(|part| part == "..")) {
+        return Err(AiError::Download("the KataGo archive looks wrong; nothing was unpacked".into()));
+    }
+    let out = tokio::process::Command::new("tar")
+        .arg("-xzf")
+        .arg(archive)
+        .arg("-C")
+        .arg(dir)
+        .output()
+        .await
+        .map_err(|e| AiError::Download(e.to_string()))?;
+    if !out.status.success() {
+        return Err(AiError::Download(format!("couldn't unpack KataGo: {}", String::from_utf8_lossy(&out.stderr).trim())));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -163,13 +198,38 @@ mod tests {
         assert!(text.contains("numSearchThreadsPerAnalysisThread = 8"));
     }
 
+    #[tokio::test]
+    async fn unpacks_an_archive_and_refuses_escapes() {
+        let root = std::env::temp_dir().join(format!("tengen-unpack-{}", std::process::id()));
+        let src = root.join("src");
+        let dest = root.join("dest");
+        std::fs::create_dir_all(src.join("lib")).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(src.join("katago"), "bin").unwrap();
+        std::fs::write(src.join("lib/libprotobuf.dylib"), "lib").unwrap();
+        let good = root.join("good.tar.gz");
+        let ok = std::process::Command::new("tar").arg("-czf").arg(&good).arg("-C").arg(&src).args(["katago", "lib"]).status().unwrap();
+        assert!(ok.success());
+        unpack(&good, &dest).await.unwrap();
+        assert!(dest.join("lib/libprotobuf.dylib").exists() && dest.join("katago").exists());
+
+        // An entry with an absolute path (kept by -P) must be refused.
+        let bad = root.join("bad.tar.gz");
+        let ok = std::process::Command::new("tar").arg("-czPf").arg(&bad).arg(src.join("katago")).status().unwrap();
+        assert!(ok.success());
+        assert!(unpack(&bad, &dest).await.is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn reads_a_manifest() {
         let m: Manifest = serde_json::from_str(
             r#"{"version":"1.16.5","files":[{"name":"katago","url":"https://x/katago","sha256":"ab","executable":true},
-                {"name":"model.bin.gz","url":"https://x/m","sha256":"cd"}]}"#,
+                {"name":"model.bin.gz","url":"https://x/m","sha256":"cd"},
+                {"name":"katago-runtime.tar.gz","url":"https://x/r","sha256":"ef","archive":true}]}"#,
         )
         .unwrap();
         assert!(m.files[0].executable && !m.files[1].executable);
+        assert!(m.files[2].archive && !m.files[0].archive);
     }
 }
