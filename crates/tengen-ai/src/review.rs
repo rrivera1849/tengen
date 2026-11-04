@@ -138,7 +138,7 @@ pub fn episodes(game: &Game, analysis: &GameAnalysis, you: Color, candidates: &[
             Move::Play { point } => Some(point),
             Move::Pass => None,
         });
-        let kind = classify(i, total, loss, played, best, previous, !flips.is_empty());
+        let kind = classify(i, total, size, loss, played, best, previous, !flips.is_empty());
         let chance = chance_for(color, before);
         let impact = loss * (1.0 - (chance - 0.5).abs() * 1.6).clamp(0.2, 1.0);
         let side = if color == you { Side::You } else { Side::Opponent };
@@ -206,6 +206,7 @@ pub fn episodes(game: &Game, analysis: &GameAnalysis, you: Color, candidates: &[
 fn classify(
     index: usize,
     total: usize,
+    size: u8,
     loss: f64,
     played: Option<Point>,
     best: Option<Point>,
@@ -225,7 +226,7 @@ fn classify(
             return Kind::Tempo;
         }
     }
-    if index * 10 >= total * 7 && loss < 8.0 {
+    if phase(index, total, size) == "endgame" && loss < 8.0 {
         return Kind::Endgame;
     }
     if far {
@@ -670,11 +671,13 @@ mod tests {
     fn classifies_urgency_and_tempo() {
         let p = Point::new;
         // Opponent played D4; the best move answers it; you played far away.
-        assert_eq!(classify(50, 200, 5.0, Some(p(15, 15)), Some(p(3, 4)), Some(p(3, 3)), false), Kind::Urgency);
+        assert_eq!(classify(50, 200, 19, 5.0, Some(p(15, 15)), Some(p(3, 4)), Some(p(3, 3)), false), Kind::Urgency);
         // You answered next to the opponent's move while the best was elsewhere.
-        assert_eq!(classify(50, 200, 5.0, Some(p(3, 4)), Some(p(15, 15)), Some(p(3, 3)), false), Kind::Tempo);
-        assert_eq!(classify(180, 200, 3.0, Some(p(3, 4)), Some(p(4, 4)), Some(p(10, 10)), false), Kind::Endgame);
-        assert_eq!(classify(50, 200, 9.0, Some(p(3, 4)), Some(p(4, 4)), None, true), Kind::LifeAndDeath);
+        assert_eq!(classify(50, 200, 19, 5.0, Some(p(3, 4)), Some(p(15, 15)), Some(p(3, 3)), false), Kind::Tempo);
+        assert_eq!(classify(180, 200, 19, 3.0, Some(p(3, 4)), Some(p(4, 4)), Some(p(10, 10)), false), Kind::Endgame);
+        assert_eq!(classify(50, 200, 19, 9.0, Some(p(3, 4)), Some(p(4, 4)), None, true), Kind::LifeAndDeath);
+        // Late in a very short game is still the opening, never the endgame.
+        assert_eq!(classify(6, 8, 9, 3.0, Some(p(3, 4)), Some(p(4, 4)), None, false), Kind::Local);
     }
 
     #[test]
