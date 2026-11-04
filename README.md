@@ -42,13 +42,13 @@ OGS signs apps in through the browser (OAuth2 with PKCE), so Tengen never sees y
    - **Client type:** Public
    - **Authorization grant type:** Authorization code
    - **Redirect URIs:** `http://127.0.0.1:47613/oauth/callback` (exactly this)
-3. Copy the **client ID** into `crates/tengen-ogs/src/auth.rs`:
+3. Copy `tengen.local.example.toml` to `tengen.local.toml` (git ignores it) and paste the **client ID** in:
 
-   ```rust
-   const DEFAULT_CLIENT_ID: Option<&str> = Some("paste-the-client-id-here");
+   ```toml
+   ogs_client_id = "paste-the-client-id-here"
    ```
 
-   A public client has no secret, so the ID is safe to commit. To try a different registration without editing the file, build with `TENGEN_OGS_CLIENT_ID=… npm run tauri dev`.
+   Rebuild after changing it. You can also set `TENGEN_OGS_CLIENT_ID=…` when building instead; the environment variable wins.
 
 Then choose **Play online** (⌘L) and **Sign in with OGS**. Your browser opens OGS's sign-in page and hands control back to Tengen when you approve. The sign-in is kept in the macOS Keychain and renewed automatically; it lasts 30 days between uses.
 

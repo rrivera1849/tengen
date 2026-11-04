@@ -1,0 +1,7 @@
+# Settings for your own builds of Tengen. Copy this file to tengen.local.toml
+# (which git ignores) and fill it in. Rebuild after changing it.
+
+# The client ID of your OGS app registration (see "Signing in to OGS" in the
+# README). Public clients have no secret, so this isn't sensitive, but keeping
+# it here means pulls never conflict with it.
+ogs_client_id = ""
