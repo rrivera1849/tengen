@@ -69,11 +69,14 @@ jobs:
           curl -fL "$url" -o model.bin.gz
 
       - name: Smoke test
+        # macOS has no `timeout` command; GitHub stops the step instead.
+        # The first start converts the network for the Neural Engine.
+        timeout-minutes: 25
         run: |
           mkdir -p logs
           printf 'logDir = logs\nreportAnalysisWinratesAs = BLACK\nmaxVisits = 20\nnumAnalysisThreads = 1\nnumSearchThreadsPerAnalysisThread = 4\n' > smoke.cfg
           echo '{"id":"smoke","moves":[["B","E5"]],"rules":"japanese","komi":7,"boardXSize":9,"boardYSize":9,"maxVisits":20}' \
-            | timeout 1500 ./runtime/katago analysis -config smoke.cfg -model model.bin.gz > answer.json
+            | ./runtime/katago analysis -config smoke.cfg -model model.bin.gz > answer.json
           cat answer.json
           grep -q '"rootInfo"' answer.json
 
