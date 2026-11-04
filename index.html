@@ -10,61 +10,85 @@
     <div class="titlebar" data-tauri-drag-region></div>
 
     <main class="stage">
-      <header class="players">
-        <div class="player black">
-          <span class="dot" aria-hidden="true"></span>
-          <div>
-            <p class="name" id="black-name">Black</p>
-            <p class="meta" id="black-meta"></p>
-            <p class="clock" id="black-clock"></p>
-          </div>
-        </div>
-        <p class="result" id="result"></p>
-        <div class="player white">
-          <div>
-            <p class="name" id="white-name">White</p>
-            <p class="meta" id="white-meta"></p>
-            <p class="clock" id="white-clock"></p>
-          </div>
-          <span class="dot" aria-hidden="true"></span>
-        </div>
+      <header class="top">
+        <p class="brand">Tengen</p>
+        <p class="result" id="result" aria-live="polite"></p>
+        <p class="game-info" id="game-info"></p>
       </header>
 
-      <div class="board-wrap">
-        <svg id="board" role="img" aria-label="Go board"></svg>
+      <div class="table">
+        <section class="player black" aria-label="Black">
+          <div class="name-row">
+            <p class="name" id="black-name">Black</p>
+            <span class="dot" aria-hidden="true"></span>
+          </div>
+          <p class="meta" id="black-meta"></p>
+          <p class="clock" id="black-clock"></p>
+          <p class="clock-note" id="black-clock-note"></p>
+          <p class="turn"><span class="glow" aria-hidden="true"></span><span class="turn-text">To play</span></p>
+        </section>
+
+        <div class="board-column">
+          <div class="matchup" aria-hidden="true">
+            <p><span class="dot black" aria-hidden="true"></span><span id="mu-black"></span></p>
+            <p><span id="mu-white"></span><span class="dot white" aria-hidden="true"></span></p>
+          </div>
+          <div class="board-wrap">
+            <div class="board-shadow" aria-hidden="true"></div>
+            <svg id="board" role="img" aria-label="Go board"></svg>
+            <div class="board-edge" aria-hidden="true"></div>
+          </div>
+        </div>
+
+        <section class="player white" aria-label="White">
+          <div class="name-row">
+            <span class="dot" aria-hidden="true"></span>
+            <p class="name" id="white-name">White</p>
+          </div>
+          <p class="meta" id="white-meta"></p>
+          <p class="clock" id="white-clock"></p>
+          <p class="clock-note" id="white-clock-note"></p>
+          <p class="turn"><span class="glow" aria-hidden="true"></span><span class="turn-text">To play</span></p>
+        </section>
+
+        <aside class="review" id="review" aria-label="Review"></aside>
       </div>
 
-      <!-- The bar shows one set of actions at a time: reviewing, playing live, or scoring. -->
-      <footer class="bar" data-mode="review">
-        <div class="actions" data-for="review">
-          <button data-action="new">New</button>
-          <button data-action="open">Open</button>
-          <button data-action="ogs">OGS game</button>
-          <button data-action="save">Save</button>
+      <!-- One capsule of controls; each group shows only in its mode. -->
+      <nav class="bar" data-mode="review" aria-label="Game controls">
+        <div class="group" data-for="review">
+          <button class="icon" data-action="new" aria-label="New game" title="New game (⌘N)"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M12 9v6M9 12h6"/></svg></button>
+          <button class="icon" data-action="open" aria-label="Open SGF" title="Open SGF (⌘O)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+          <button class="icon" data-action="ogs" aria-label="Get a game from OGS" title="Get a game from OGS (⌘D)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M5 19h14"/></svg></button>
+          <button class="icon" data-action="save" aria-label="Save SGF" title="Save SGF (⌘S)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h9l3 3v13H6z"/><path d="M9 4v5h6"/><path d="M9 20v-6h6v6"/></svg></button>
         </div>
-        <div class="actions" data-for="live">
-          <button data-action="pass">Pass</button>
-          <button data-action="resign">Resign</button>
+        <div class="group" data-for="live">
+          <button data-action="pass"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg>Pass</button>
+          <button data-action="resign"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8.5 8.5l7 7"/></svg>Resign</button>
         </div>
-        <div class="actions" data-for="scoring">
-          <button data-action="accept" class="primary">Accept score</button>
-          <button data-action="resign">Resign</button>
+        <div class="group" data-for="scoring">
+          <button data-action="accept" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Accept score</button>
+          <button data-action="resign"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8.5 8.5l7 7"/></svg>Resign</button>
         </div>
-        <div class="actions" data-for="finished">
-          <button data-action="save">Save</button>
-          <button data-action="leave">Done</button>
+        <div class="group" data-for="finished">
+          <button data-action="save"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h9l3 3v13H6z"/><path d="M9 4v5h6"/><path d="M9 20v-6h6v6"/></svg>Save</button>
+          <button data-action="leave"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Done</button>
         </div>
-        <div class="scrub">
+        <span class="sep" aria-hidden="true"></span>
+        <div class="group scrub">
+          <button class="icon" data-action="prev" aria-label="Previous move" title="Previous move (←)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
           <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Move" />
           <span id="move-count">Start</span>
+          <button class="icon" data-action="next" aria-label="Next move" title="Next move (→)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         </div>
-        <div class="actions end">
-          <button data-action="estimate" id="estimate-button" aria-pressed="false">Estimate</button>
-          <button data-action="review" data-for="review finished">Review</button>
-          <button data-action="online" data-for="review finished">Online</button>
-          <button data-action="look">Board</button>
+        <span class="sep" aria-hidden="true"></span>
+        <div class="group">
+          <button data-action="estimate" id="estimate-button" aria-pressed="false" title="Score estimate (E)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16"/><path d="M5 8h14"/><path d="M5 8l-2.5 6a3 3 0 0 0 5 0z"/><path d="M19 8l-2.5 6a3 3 0 0 0 5 0z"/></svg>Estimate</button>
+          <button data-action="review" data-for="review finished" title="Review (R)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Review</button>
+          <button data-action="online" data-for="review finished" title="Play online (⌘L)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17"/></svg>Online</button>
+          <button data-action="look" title="Board"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 12h16M12 4v16"/></svg>Board</button>
         </div>
-      </footer>
+      </nav>
 
       <div class="searching" id="searching" hidden>
         <span class="pulse" aria-hidden="true"></span>
@@ -74,8 +98,6 @@
 
       <p class="notice" id="notice" role="status" aria-live="polite"></p>
     </main>
-
-    <aside class="review" id="review" aria-label="Review"></aside>
 
     <dialog id="new-dialog">
       <form method="dialog">

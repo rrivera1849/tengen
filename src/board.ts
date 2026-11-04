@@ -1,7 +1,11 @@
-// Draws the board as SVG. Wood grain is procedural (feTurbulence), so every
-// texture stays sharp at any window size and weighs nothing.
+// Draws the board as SVG: a photographed-style wood texture under lamplight,
+// the grid, glossy or flat stones, and the estimate and lesson overlays.
 
 import type { Color, View } from "./api";
+import bambooUrl from "./assets/bamboo.jpg";
+import kayaUrl from "./assets/kaya.jpg";
+import paperUrl from "./assets/paper.jpg";
+import shinkayaUrl from "./assets/shinkaya.jpg";
 
 export type Texture = "kaya" | "shinkaya" | "bamboo" | "ink";
 export type StoneStyle = "shell" | "flat";
@@ -28,16 +32,12 @@ export interface Look {
 const NS = "http://www.w3.org/2000/svg";
 const LETTERS = "ABCDEFGHJKLMNOPQRSTUVWXYZ"; // Go coordinates skip I
 
-/**
- * Wood per texture. Frequencies are per board unit (one grid step), so a high
- * y-frequency with a low x-frequency draws long horizontal grain lines.
- * `slope`/`cut` sharpen the noise into distinct lines rather than a haze.
- */
-const WOODS: Record<Texture, { base: string; dark: string; freq: string; octaves: number; slope: number; cut: number; amount: number }> = {
-  kaya: { base: "#E2B46A", dark: "#A8742F", freq: "0.03 2.8", octaves: 4, slope: 2.4, cut: -0.75, amount: 0.24 },
-  shinkaya: { base: "#ECCD90", dark: "#B98F49", freq: "0.015 3.6", octaves: 3, slope: 2.6, cut: -0.9, amount: 0.2 },
-  bamboo: { base: "#D7B877", dark: "#8F6E33", freq: "1.6 0.018", octaves: 3, slope: 2.2, cut: -0.6, amount: 0.2 },
-  ink: { base: "#F2F1EC", dark: "#F2F1EC", freq: "0 0", octaves: 1, slope: 0, cut: 0, amount: 0 },
+/** Each board's texture and grid ink; the ink-on-paper board has no lamplight. */
+const WOODS: Record<Texture, { url: string; line: string; lit: boolean }> = {
+  kaya: { url: kayaUrl, line: "#3a2410", lit: true },
+  shinkaya: { url: shinkayaUrl, line: "#3d2a12", lit: true },
+  bamboo: { url: bambooUrl, line: "#3a2a12", lit: true },
+  ink: { url: paperUrl, line: "#24221f", lit: false },
 };
 
 export function starPoints(size: number): [number, number][] {
@@ -74,8 +74,9 @@ export class BoardView {
     this.render();
   }
 
+  /** One grid step of wood around the lines; more room for coordinates. */
   private margin() {
-    return this.look.coords ? 1.3 : 0.85;
+    return this.look.coords ? 1.35 : 1;
   }
 
   private pointAt(e: MouseEvent): [number, number] | null {
@@ -139,7 +140,7 @@ export class BoardView {
       this.svg.append(this.stone(x, y, c, dead.has(`${x},${y}`) ? "stone dead" : "stone"));
     }
     if (this.estimate) this.svg.append(this.territory(this.estimate));
-    if (v.last && !this.line) this.svg.append(this.lastMark(v.last, v.stones));
+    if (v.last && !this.line) this.svg.append(this.lastMark(v.last));
     if (this.line) this.svg.append(this.ghostLine(this.line));
     this.hover = null;
   }
@@ -147,9 +148,9 @@ export class BoardView {
   private territory(e: Overlay) {
     const g = svg("g", { class: "territory" });
     for (const [x, y, c] of e.territory) {
-      const s = 0.34;
+      const s = 0.35;
       g.append(svg("rect", {
-        x: String(x - s / 2), y: String(y - s / 2), width: String(s), height: String(s), rx: "0.04",
+        x: String(x - s / 2), y: String(y - s / 2), width: String(s), height: String(s), rx: "0.06",
         class: c,
       }));
     }
@@ -183,59 +184,58 @@ export class BoardView {
   }
 
   private defs() {
-    const w = WOODS[this.look.texture];
     return svg("defs", {}, [
-      svg("filter", { id: "grain", x: "0", y: "0", width: "100%", height: "100%" }, [
-        svg("feTurbulence", { type: "fractalNoise", baseFrequency: w.freq, numOctaves: String(w.octaves), seed: "7" }),
-        // Use the noise's red channel as a mask, then sharpen it into lines.
-        svg("feColorMatrix", { type: "matrix", values: "0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0" }),
-        svg("feComponentTransfer", {}, [
-          svg("feFuncA", { type: "linear", slope: String(w.slope), intercept: String(w.cut) }),
-        ]),
-        svg("feComposite", { in2: "SourceGraphic", operator: "in" }),
+      svg("radialGradient", { id: "slate", cx: "0.34", cy: "0.28", r: "0.78" }, [
+        svg("stop", { offset: "0", "stop-color": "#8a8f8d" }),
+        svg("stop", { offset: "0.22", "stop-color": "#3a3d3c" }),
+        svg("stop", { offset: "0.55", "stop-color": "#151717" }),
+        svg("stop", { offset: "1", "stop-color": "#050606" }),
       ]),
-      svg("radialGradient", { id: "slate", cx: "0.36", cy: "0.32", r: "0.75" }, [
-        svg("stop", { offset: "0", "stop-color": "#5B605E" }),
-        svg("stop", { offset: "0.45", "stop-color": "#232625" }),
-        svg("stop", { offset: "1", "stop-color": "#0E100F" }),
+      svg("radialGradient", { id: "shell", cx: "0.36", cy: "0.28", r: "0.8" }, [
+        svg("stop", { offset: "0", "stop-color": "#ffffff" }),
+        svg("stop", { offset: "0.3", "stop-color": "#f6f3ea" }),
+        svg("stop", { offset: "0.7", "stop-color": "#e2ddd0" }),
+        svg("stop", { offset: "1", "stop-color": "#c4bdac" }),
       ]),
-      svg("radialGradient", { id: "shell", cx: "0.38", cy: "0.32", r: "0.8" }, [
-        svg("stop", { offset: "0", "stop-color": "#FFFFFF" }),
-        svg("stop", { offset: "0.6", "stop-color": "#EEEDE8" }),
-        svg("stop", { offset: "1", "stop-color": "#C9C8C1" }),
+      // Light from the upper left: the lamp's warm pool, and a soft darkening at the rim.
+      svg("radialGradient", { id: "lamp", cx: "0.42", cy: "0.38", r: "0.7" }, [
+        svg("stop", { offset: "0", "stop-color": "#fff0d2", "stop-opacity": "0.2" }),
+        svg("stop", { offset: "1", "stop-color": "#fff0d2", "stop-opacity": "0" }),
       ]),
-      svg("filter", { id: "drop", x: "-30%", y: "-30%", width: "160%", height: "160%" }, [
-        svg("feDropShadow", { dx: "0.05", dy: "0.07", stdDeviation: "0.05", "flood-color": "#2B1A05", "flood-opacity": "0.35" }),
+      svg("radialGradient", { id: "rim", cx: "0.5", cy: "0.5", r: "0.75" }, [
+        svg("stop", { offset: "0.7", "stop-color": "#281400", "stop-opacity": "0" }),
+        svg("stop", { offset: "1", "stop-color": "#281400", "stop-opacity": "0.3" }),
+      ]),
+      svg("filter", { id: "drop", x: "-40%", y: "-40%", width: "190%", height: "190%" }, [
+        svg("feDropShadow", { dx: "0.06", dy: "0.12", stdDeviation: "0.07", "flood-color": "#140800", "flood-opacity": "0.5" }),
       ]),
     ]);
   }
 
   private wood(m: number, span: number) {
     const w = WOODS[this.look.texture];
+    const box = { x: String(-m), y: String(-m), width: String(span), height: String(span) };
     const g = svg("g", { class: "wood" });
-    g.append(svg("rect", { x: String(-m), y: String(-m), width: String(span), height: String(span), rx: "0.18", fill: w.base }));
-    if (this.look.texture !== "ink") {
-      g.append(svg("rect", {
-        x: String(-m), y: String(-m), width: String(span), height: String(span), rx: "0.18",
-        fill: w.dark, filter: "url(#grain)", opacity: String(w.amount),
-      }));
+    g.append(svg("image", { ...box, href: w.url, preserveAspectRatio: "xMidYMid slice" }));
+    if (w.lit) {
+      g.append(svg("rect", { ...box, fill: "url(#lamp)" }));
+      g.append(svg("rect", { ...box, fill: "url(#rim)" }));
     }
     return g;
   }
 
   private grid(n: number) {
     const g = svg("g", { class: "grid" });
-    const ink = this.look.texture === "ink";
-    const line = ink ? "#2A2E2C" : "#3B2A14";
-    const width = ink ? 0.028 : 0.034;
+    const line = WOODS[this.look.texture].line;
+    const width = 0.034;
     for (let i = 0; i < n; i++) {
       const edge = i === 0 || i === n - 1;
-      const sw = String(edge ? width * 1.8 : width);
-      g.append(svg("line", { x1: "0", y1: String(i), x2: String(n - 1), y2: String(i), stroke: line, "stroke-width": sw, "stroke-linecap": "square", opacity: "0.82" }));
-      g.append(svg("line", { x1: String(i), y1: "0", x2: String(i), y2: String(n - 1), stroke: line, "stroke-width": sw, "stroke-linecap": "square", opacity: "0.82" }));
+      const sw = String(edge ? width * 1.6 : width);
+      g.append(svg("line", { x1: "0", y1: String(i), x2: String(n - 1), y2: String(i), stroke: line, "stroke-width": sw, "stroke-linecap": "square", opacity: "0.74" }));
+      g.append(svg("line", { x1: String(i), y1: "0", x2: String(i), y2: String(n - 1), stroke: line, "stroke-width": sw, "stroke-linecap": "square", opacity: "0.74" }));
     }
     for (const [x, y] of starPoints(n)) {
-      g.append(svg("circle", { cx: String(x), cy: String(y), r: "0.1", fill: line, opacity: "0.9" }));
+      g.append(svg("circle", { cx: String(x), cy: String(y), r: "0.09", fill: line, opacity: "0.9" }));
     }
     return g;
   }
@@ -261,26 +261,23 @@ export class BoardView {
     const attrs: Record<string, string> = { cx: String(x), cy: String(y), r: "0.47" };
     if (flat) {
       Object.assign(attrs, color === "black"
-        ? { fill: "#1C201F" }
-        : { fill: "#F7F6F2", stroke: "#2A2E2C", "stroke-width": "0.035" });
+        ? { fill: "#202226" }
+        : { fill: "#fbfbf8", stroke: "#2b2d31", "stroke-width": "0.04" });
     } else {
       Object.assign(attrs, { fill: color === "black" ? "url(#slate)" : "url(#shell)" });
-      if (cls.startsWith("stone")) attrs.filter = "url(#drop)";
       // On pale paper a shell stone needs a hairline edge to stay visible.
       if (color === "white" && this.look.texture === "ink") {
         Object.assign(attrs, { stroke: "#9a9c96", "stroke-width": "0.02" });
       }
     }
+    if (cls.startsWith("stone") || cls === "line-stone") attrs.filter = "url(#drop)";
     g.append(svg("circle", attrs));
     return g;
   }
 
-  private lastMark([x, y]: [number, number], stones: View["stones"]) {
-    const c = stones.find(([a, b]) => a === x && b === y)?.[2];
-    return svg("circle", {
-      class: `last ${c === "black" ? "on-black" : "on-white"}`,
-      cx: String(x), cy: String(y), r: "0.16", fill: "none", "stroke-width": "0.06",
-    });
+  /** The last move: a small brass dot. */
+  private lastMark([x, y]: [number, number]) {
+    return svg("circle", { class: "last", cx: String(x), cy: String(y), r: "0.17" });
   }
 }
 

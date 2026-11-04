@@ -17,15 +17,19 @@ export function setClock(c: Clock | null) {
 function render() {
   for (const color of ["black", "white"] as Color[]) {
     const el = document.getElementById(`${color}-clock`)!;
+    const note = document.getElementById(`${color}-clock-note`)!;
     if (!clock) {
       el.textContent = "";
+      note.textContent = "";
       el.className = "clock";
       continue;
     }
     const running = clock.toMove === color && !clock.paused;
     const c = { ...clock[color] };
     if (running) spend(c, (performance.now() - receivedAt) / 1000);
-    el.textContent = describe(c);
+    const [time, detail] = describe(c);
+    el.textContent = time;
+    note.textContent = detail;
     el.className = `clock${running ? " running" : ""}${running && remaining(c) < 10 ? " low" : ""}`;
   }
 }
@@ -56,16 +60,18 @@ function remaining(c: PlayerClock) {
   return c.main > 0 ? c.main : (c.periodLeft ?? c.periodTime ?? 0);
 }
 
-function describe(c: PlayerClock) {
+/** The big time, and a note about byo-yomi underneath it. */
+function describe(c: PlayerClock): [string, string] {
   const periods = c.periods ?? 0;
+  const period = c.periodTime != null ? `${Math.round(c.periodTime)}s` : "";
   if (c.main > 0) {
-    return periods && c.periodTime ? `${mmss(c.main)}  +${periods} × ${mmss(c.periodTime)}` : mmss(c.main);
+    return [mmss(c.main), periods && period ? `then ${periods} periods of ${period}` : ""];
   }
   if (c.periodTime != null) {
     const left = c.periodLeft ?? c.periodTime;
-    return periods <= 1 ? `${mmss(left)}  last period` : `${mmss(left)}  ${periods} periods`;
+    return [mmss(left), periods <= 1 ? "last period" : `${periods} periods of ${period}`];
   }
-  return mmss(0);
+  return [mmss(0), ""];
 }
 
 function mmss(secs: number) {

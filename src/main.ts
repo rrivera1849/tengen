@@ -1,3 +1,5 @@
+import "@fontsource-variable/fraunces/opsz.css";
+import "@fontsource-variable/fraunces/opsz-italic.css";
 import { api, onEvents, previewClock, type Color, type OgsStatus, type Speed, type View } from "./api";
 import { BoardView, type Look, type StoneStyle, type Texture } from "./board";
 import { setClock } from "./clock";
@@ -70,6 +72,13 @@ function show(v: View) {
 
   $("#black-name").textContent = v.black;
   $("#white-name").textContent = v.white;
+  $("#mu-black").textContent = [v.black, v.blackRank].filter(Boolean).join(" ");
+  $("#mu-white").textContent = [v.white, v.whiteRank].filter(Boolean).join(" ");
+  $("#game-info").textContent = `${v.server ? `${v.server} game` : "Local game"}, ${v.size} × ${v.size}`;
+  const mineToMove = !!v.live && v.live.myColor === v.toMove;
+  document.querySelectorAll(".player .turn-text").forEach((el) => {
+    el.textContent = mineToMove ? "Your move" : "To play";
+  });
   $("#black-meta").textContent = meta(v.blackRank, v.capturesBlack, mine(v, "black"));
   $("#white-meta").textContent = meta(v.whiteRank, v.capturesWhite, mine(v, "white"), `komi ${v.komi}`);
   $("#result").textContent = v.cursor === v.total && v.result ? v.result : "";
@@ -290,6 +299,8 @@ const actions: Record<string, () => void> = {
     dialog("ogs-dialog").showModal();
   },
   pass: () => runView(api.pass),
+  prev: () => view && runView(() => api.goTo(Math.max(0, view!.cursor - 1))),
+  next: () => view && runView(() => api.goTo(view!.cursor + 1)),
   estimate: () => setEstimate(!estimateOn),
   review: () => startReview(),
   online: () => openOnline(),
