@@ -62,6 +62,11 @@ body {
   gap: 14px;
 }
 
+/* A live game adds a clock line under each name. */
+.stage:has(.clock:not(:empty)) {
+  --b: min(calc(100vw - 48px), calc(100vh - 190px));
+}
+
 /* ---------- players ---------- */
 
 .players {
@@ -73,7 +78,7 @@ body {
 
 .player {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   opacity: 0.55;
   transition: opacity 200ms ease;
@@ -91,6 +96,7 @@ body {
 .player .dot {
   width: 14px;
   height: 14px;
+  margin-top: 3px; /* sits on the name's line */
   border-radius: 50%;
   flex: none;
 }
@@ -119,6 +125,28 @@ body {
   min-height: 1.4em;
 }
 
+.clock {
+  margin: 4px 0 0;
+  font: 15px var(--sans);
+  font-variant-numeric: tabular-nums;
+  color: var(--quiet);
+  white-space: pre;
+  min-height: 0;
+}
+
+.clock:empty {
+  display: none;
+}
+
+.clock.running {
+  color: var(--ink);
+}
+
+.clock.low {
+  color: var(--indigo);
+  font-weight: 600;
+}
+
 .result {
   margin: 0;
   font: 500 15px var(--serif);
@@ -139,6 +167,11 @@ body {
   border-radius: 6px;
   box-shadow: var(--board-shadow);
   cursor: pointer;
+}
+
+/* Stones OGS proposes as dead once both players pass. */
+#board .dead {
+  opacity: 0.32;
 }
 
 #board .ghost {
@@ -203,6 +236,65 @@ body {
 
 .actions.end {
   justify-content: flex-end;
+}
+
+/* Show only the actions for the current mode. */
+.bar [data-for] {
+  display: none;
+}
+
+.bar[data-mode="review"] [data-for~="review"],
+.bar[data-mode="live"] [data-for~="live"],
+.bar[data-mode="scoring"] [data-for~="scoring"],
+.bar[data-mode="finished"] [data-for~="finished"] {
+  display: flex;
+}
+
+.actions.end [data-for] {
+  display: none;
+}
+
+.bar[data-mode="review"] .actions.end [data-for~="review"],
+.bar[data-mode="finished"] .actions.end [data-for~="finished"] {
+  display: inline-block;
+}
+
+/* During a live game the bar stays fully visible: its buttons matter. */
+.bar:not([data-mode="review"]) {
+  opacity: 1;
+}
+
+.searching {
+  position: fixed;
+  left: 50%;
+  top: 40px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px 6px 14px;
+  border-radius: 999px;
+  background: var(--raised);
+  box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.35);
+  z-index: 20;
+}
+
+.searching[hidden] {
+  display: none;
+}
+
+.pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--indigo);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
 }
 
 button {
@@ -300,6 +392,46 @@ dialog input {
   border-radius: 7px;
   border: 1px solid var(--line);
   background: var(--room);
+}
+
+.lede {
+  margin: 0;
+  color: var(--quiet);
+  max-width: 40ch;
+}
+
+.lede + .lede {
+  margin-top: 8px;
+}
+
+.hint {
+  margin: 8px 0 0;
+  color: var(--quiet);
+  font-size: 12px;
+}
+
+.account {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+
+button.link {
+  padding: 2px 4px;
+  color: var(--quiet);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 .choices {

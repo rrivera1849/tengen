@@ -76,6 +76,7 @@ pub struct MatchRequest {
 #[serde(rename_all = "lowercase")]
 pub enum Speed {
     Blitz,
+    Rapid,
     Live,
     Correspondence,
 }

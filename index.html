@@ -16,6 +16,7 @@
           <div>
             <p class="name" id="black-name">Black</p>
             <p class="meta" id="black-meta"></p>
+            <p class="clock" id="black-clock"></p>
           </div>
         </div>
         <p class="result" id="result"></p>
@@ -23,6 +24,7 @@
           <div>
             <p class="name" id="white-name">White</p>
             <p class="meta" id="white-meta"></p>
+            <p class="clock" id="white-clock"></p>
           </div>
           <span class="dot" aria-hidden="true"></span>
         </div>
@@ -32,22 +34,42 @@
         <svg id="board" role="img" aria-label="Go board"></svg>
       </div>
 
-      <footer class="bar">
-        <div class="actions">
+      <!-- The bar shows one set of actions at a time: reviewing, playing live, or scoring. -->
+      <footer class="bar" data-mode="review">
+        <div class="actions" data-for="review">
           <button data-action="new">New game</button>
           <button data-action="open">Open</button>
           <button data-action="ogs">From OGS</button>
           <button data-action="save">Save SGF</button>
+        </div>
+        <div class="actions" data-for="live">
+          <button data-action="pass">Pass</button>
+          <button data-action="resign">Resign</button>
+        </div>
+        <div class="actions" data-for="scoring">
+          <button data-action="accept" class="primary">Accept score</button>
+          <button data-action="resign">Resign</button>
+        </div>
+        <div class="actions" data-for="finished">
+          <button data-action="save">Save SGF</button>
+          <button data-action="leave">Done</button>
         </div>
         <div class="scrub">
           <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Move" />
           <span id="move-count">Start</span>
         </div>
         <div class="actions end">
-          <button data-action="pass">Pass</button>
+          <button data-action="pass" data-for="review">Pass</button>
+          <button data-action="online" data-for="review finished">Play online</button>
           <button data-action="look">Board</button>
         </div>
       </footer>
+
+      <div class="searching" id="searching" hidden>
+        <span class="pulse" aria-hidden="true"></span>
+        <span>Looking for an opponent on OGS</span>
+        <button data-action="cancel-match">Cancel</button>
+      </div>
 
       <p class="notice" id="notice" role="status" aria-live="polite"></p>
     </main>
@@ -73,6 +95,58 @@
           <button class="quiet" value="cancel">Cancel</button>
           <button value="review">Review</button>
           <button value="download" class="primary">Download SGF</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="online-dialog">
+      <form method="dialog">
+        <h2>Play on OGS</h2>
+
+        <div data-when="signed-out">
+          <p class="lede">Sign in on online-go.com in your browser. Tengen never sees your password.</p>
+          <p class="lede" id="not-configured" hidden>
+            Tengen needs its OGS app registration first. The README explains the one-time setup.
+          </p>
+          <div class="row">
+            <button class="quiet" value="cancel">Cancel</button>
+            <button value="sign-in" class="primary" id="sign-in">Sign in with OGS</button>
+          </div>
+        </div>
+
+        <div data-when="signed-in">
+          <p class="account">
+            <span id="account-name"></span>
+            <button value="sign-out" class="link">Sign out</button>
+          </p>
+          <p class="group-label">Board</p>
+          <div class="choices" data-pick="size">
+            <button value="9">9 × 9</button>
+            <button value="13">13 × 13</button>
+            <button value="19">19 × 19</button>
+          </div>
+          <p class="group-label">Pace</p>
+          <div class="choices" data-pick="speed">
+            <button value="blitz">Blitz</button>
+            <button value="rapid">Rapid</button>
+            <button value="live">Live</button>
+          </div>
+          <p class="hint" id="speed-hint"></p>
+          <div class="row">
+            <button class="quiet" value="cancel">Cancel</button>
+            <button value="find" class="primary">Find opponent</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="resign-dialog">
+      <form method="dialog">
+        <h2>Resign this game?</h2>
+        <p class="lede">Your opponent wins and the game ends.</p>
+        <div class="row">
+          <button class="quiet" value="cancel" autofocus>Keep playing</button>
+          <button value="resign" class="primary">Resign</button>
         </div>
       </form>
     </dialog>

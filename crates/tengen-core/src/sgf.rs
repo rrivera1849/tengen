@@ -129,18 +129,38 @@ pub fn write(game: &Game) -> String {
     out
 }
 
-/// A filename like `2026-11-03 Rafael vs Opponent.sgf`, safe on macOS.
+/// A filename that sorts by date and says who played where, safe on macOS:
+/// `2026-11-04 21.34 OGS Rafael (3d) vs Opponent (2k).sgf`.
+/// Missing parts are left out; a game from no server is labelled `Local`.
 pub fn suggested_filename(game: &Game) -> String {
     let i = &game.info;
-    let mut name = String::new();
+    let player = |name: &Option<String>, rank: &Option<String>, fallback: &str| {
+        let name = name.as_deref().filter(|n| !n.trim().is_empty()).unwrap_or(fallback);
+        match rank.as_deref().filter(|r| !r.trim().is_empty()) {
+            Some(r) => format!("{} ({})", name.trim(), r.trim()),
+            None => name.trim().to_string(),
+        }
+    };
+    let mut parts: Vec<String> = Vec::new();
     if let Some(d) = &i.date {
-        name.push_str(d.split(',').next().unwrap_or(d));
-        name.push(' ');
+        // DT may list several days ("2026-11-03,04"); the first is the start.
+        parts.push(d.split(',').next().unwrap_or(d).trim().to_string());
     }
-    name.push_str(i.black.as_deref().unwrap_or("Black"));
-    name.push_str(" vs ");
-    name.push_str(i.white.as_deref().unwrap_or("White"));
-    let clean: String = name.chars().map(|c| if matches!(c, '/' | ':' | '\\') { '-' } else { c }).collect();
+    if let Some(t) = &i.time {
+        parts.push(t.trim().replace(':', "."));
+    }
+    parts.push(i.server.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Local".into()));
+    parts.push(format!(
+        "{} vs {}",
+        player(&i.black, &i.black_rank, "Black"),
+        player(&i.white, &i.white_rank, "White")
+    ));
+    let name = parts.join(" ");
+    let clean: String = name
+        .chars()
+        .map(|c| if matches!(c, '/' | ':' | '\\') { '-' } else { c })
+        .filter(|c| !c.is_control())
+        .collect();
     format!("{}.sgf", clean.trim())
 }
 
@@ -356,8 +376,16 @@ mod tests {
     }
 
     #[test]
-    fn filename_is_readable_and_safe() {
-        let g = parse("(;PB[a/b]PW[c]DT[2026-11-03])").unwrap();
-        assert_eq!(suggested_filename(&g), "2026-11-03 a-b vs c.sgf");
+    fn filename_names_server_players_ranks_and_time() {
+        let mut g = parse("(;PB[Rafael]BR[3d]PW[Opp]WR[2k]DT[2026-11-04]PC[OGS])").unwrap();
+        g.info.time = Some("21:34".into());
+        assert_eq!(suggested_filename(&g), "2026-11-04 21.34 OGS Rafael (3d) vs Opp (2k).sgf");
+    }
+
+    #[test]
+    fn filename_without_details_is_still_useful_and_safe() {
+        let g = parse("(;PB[a/b]PW[c]DT[2026-11-03,04])").unwrap();
+        assert_eq!(suggested_filename(&g), "2026-11-03 Local a-b vs c.sgf");
+        assert_eq!(suggested_filename(&Game::new(19, 6.5)), "Local Black vs White.sgf");
     }
 }

@@ -19,7 +19,11 @@ pub struct GameInfo {
     pub black_rank: Option<String>,
     pub white_rank: Option<String>,
     pub result: Option<String>,
+    /// Day the game was played, `YYYY-MM-DD` (SGF `DT`).
     pub date: Option<String>,
+    /// Local start time, `HH:MM`. SGF has no standard place for it, so it is
+    /// used for filenames only and not written into the record.
+    pub time: Option<String>,
     pub rules: Option<String>,
     /// Which server the game came from ("OGS", "Fox"), if any.
     pub server: Option<String>,

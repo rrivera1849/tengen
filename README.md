@@ -6,15 +6,16 @@ Tengen (天元) is the center point of the board: every server meets in one plac
 
 ## Status
 
-Early skeleton. What works today:
+Early, but playable. What works today:
 
 - A board with four textures (kaya, shin-kaya, bamboo, ink on paper), shell-and-slate or flat stones, light and dark mode, and a soft stone sound
 - Full rules: captures, ko and suicide
 - Single-click play, pass, undo, and stepping through any game
-- Open and save SGF files
+- Open and save SGF files. Saves default to `~/Documents/kaya`, named like `2026-11-04 21.34 OGS Rafael (3d) vs Opponent (2k).sgf`
 - Load any OGS game by number or link, for review or to download its SGF
+- Sign in to OGS and play live: automatch on 9×9, 13×13 or 19×19 at blitz, rapid or live pace, with clocks, pass, resign and accepting the score
 
-Next up: OGS sign-in and live play, local KataGo analysis, the point estimator, then Fox.
+Next up: local KataGo analysis, the point estimator, then Fox.
 
 ## Run it on your Mac
 
@@ -26,7 +27,27 @@ npm run tauri dev      # opens the app with live reload
 npm run tauri build    # makes Tengen.app and a .dmg in src-tauri/target/release/bundle
 ```
 
-`npm run dev` alone opens the interface in a browser with a sample position, which is handy for design work.
+`npm run dev` alone opens the interface in a browser with a sample position, which is handy for design work. Add `?live` to the address to preview a live game with clocks.
+
+## Signing in to OGS
+
+OGS signs apps in through the browser (OAuth2 with PKCE), so Tengen never sees your password. Tengen needs an OGS app registration once:
+
+1. Sign in at online-go.com and open [online-go.com/oauth2/applications](https://online-go.com/oauth2/applications/).
+2. Register a new application:
+   - **Name:** Tengen
+   - **Client type:** Public
+   - **Authorization grant type:** Authorization code
+   - **Redirect URIs:** `http://127.0.0.1:47613/oauth/callback` (exactly this)
+3. Copy the **client ID** into `crates/tengen-ogs/src/auth.rs`:
+
+   ```rust
+   const DEFAULT_CLIENT_ID: Option<&str> = Some("paste-the-client-id-here");
+   ```
+
+   A public client has no secret, so the ID is safe to commit. To try a different registration without editing the file, build with `TENGEN_OGS_CLIENT_ID=… npm run tauri dev`.
+
+Then choose **Play online** (⌘L) and **Sign in with OGS**. Your browser opens OGS's sign-in page and hands control back to Tengen when you approve. The sign-in is kept in the macOS Keychain and renewed automatically; it lasts 30 days between uses.
 
 ## Keys
 
@@ -40,6 +61,7 @@ npm run tauri build    # makes Tengen.app and a .dmg in src-tauri/target/release
 | ⌘O | Open an SGF file |
 | ⌘S | Save the game as SGF |
 | ⌘D | Get a game from OGS |
+| ⌘L | Play online |
 
 ## How it's built
 
@@ -47,7 +69,7 @@ npm run tauri build    # makes Tengen.app and a .dmg in src-tauri/target/release
 src/                  Interface: TypeScript, drawn as SVG in the Mac web view
 src-tauri/            The app shell: a thin set of commands over the crates
 crates/tengen-core/   Board rules, game records, SGF, and the server-adapter interface
-crates/tengen-ogs/    Online-Go.com adapter
+crates/tengen-ogs/    Online-Go.com adapter: REST, sign-in (auth.rs) and live play (realtime.rs)
 crates/tengen-fox/    Fox adapter (protocol research not started)
 ```
 

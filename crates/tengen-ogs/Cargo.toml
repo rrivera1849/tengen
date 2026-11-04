@@ -10,6 +10,11 @@ tengen-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-
-[dev-dependencies]
-tokio.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "sync", "time"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+base64 = "0.22"
+sha2 = "0.10"
+rand = "0.8"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

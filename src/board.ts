@@ -47,7 +47,7 @@ export class BoardView {
     svg.addEventListener("pointerleave", () => this.setHover(null));
     svg.addEventListener("click", (e) => {
       const p = this.pointAt(e);
-      if (p && !this.occupied(p)) this.onPlay(p[0], p[1]);
+      if (this.interactive && p && !this.occupied(p)) this.onPlay(p[0], p[1]);
     });
   }
 
@@ -79,7 +79,11 @@ export class BoardView {
     return this.view?.stones.some(([a, b]) => a === x && b === y) ?? false;
   }
 
+  /** False while it's the opponent's turn in a live game, or during scoring. */
+  interactive = true;
+
   private track(e: PointerEvent) {
+    if (!this.interactive) return this.setHover(null);
     const p = this.pointAt(e);
     this.setHover(p && !this.occupied(p) ? p : null);
   }
@@ -101,7 +105,10 @@ export class BoardView {
     this.svg.dataset.texture = this.look.texture;
     this.svg.replaceChildren(this.defs(), this.wood(m, span), this.grid(n));
     if (this.look.coords) this.svg.append(this.coordinates(n, m));
-    for (const [x, y, c] of v.stones) this.svg.append(this.stone(x, y, c));
+    const dead = new Set((v.live?.removed ?? []).map(([x, y]) => `${x},${y}`));
+    for (const [x, y, c] of v.stones) {
+      this.svg.append(this.stone(x, y, c, dead.has(`${x},${y}`) ? "stone dead" : "stone"));
+    }
     if (v.last) this.svg.append(this.lastMark(v.last, v.stones));
     this.hover = null;
   }
@@ -189,7 +196,7 @@ export class BoardView {
         : { fill: "#F7F6F2", stroke: "#2A2E2C", "stroke-width": "0.035" });
     } else {
       Object.assign(attrs, { fill: color === "black" ? "url(#slate)" : "url(#shell)" });
-      if (cls === "stone") attrs.filter = "url(#drop)";
+      if (cls.startsWith("stone")) attrs.filter = "url(#drop)";
       // On pale paper a shell stone needs a hairline edge to stay visible.
       if (color === "white" && this.look.texture === "ink") {
         Object.assign(attrs, { stroke: "#9a9c96", "stroke-width": "0.02" });
