@@ -74,7 +74,18 @@ jobs:
         timeout-minutes: 25
         run: |
           mkdir -p logs
-          printf 'logDir = logs\nreportAnalysisWinratesAs = BLACK\nmaxVisits = 20\nnumAnalysisThreads = 1\nnumSearchThreadsPerAnalysisThread = 4\n' > smoke.cfg
+          # The same settings Tengen writes (crates/tengen-ai/src/runtime.rs).
+          cat > smoke.cfg <<'EOF'
+          logDir = logs
+          reportAnalysisWinratesAs = BLACK
+          maxVisits = 400
+          numAnalysisThreads = 2
+          numSearchThreadsPerAnalysisThread = 8
+          nnMaxBatchSize = 64
+          nnCacheSizePowerOfTwo = 21
+          nnMutexPoolSizePowerOfTwo = 16
+          nnRandomize = true
+          EOF
           echo '{"id":"smoke","moves":[["B","E5"]],"rules":"japanese","komi":7,"boardXSize":9,"boardYSize":9,"maxVisits":20}' \
             | ./runtime/katago analysis -config smoke.cfg -model model.bin.gz > answer.json
           cat answer.json
