@@ -43,9 +43,18 @@ pub async fn connect(
             .await
             .map_err(|_| AdapterError::Network("Pandanet didn't answer".into()))?
             .map_err(net)?;
-    let leftover = tokio::time::timeout(Duration::from_secs(25), sign_in(&mut stream, credentials))
-        .await
-        .map_err(|_| AdapterError::Network("Pandanet didn't finish signing in".into()))??;
+    let mut transcript = String::new();
+    let leftover = tokio::time::timeout(
+        Duration::from_secs(25),
+        sign_in(&mut stream, credentials, &mut transcript),
+    )
+    .await
+    .map_err(|_| {
+        AdapterError::Network(format!(
+            "Pandanet didn't finish signing in{}",
+            last_words(&transcript, &credentials.password)
+        ))
+    })??;
 
     let (mut reader, mut writer) = stream.into_split();
     let (outbox, mut queue) = mpsc::unbounded_channel::<String>();
@@ -68,7 +77,7 @@ pub async fn connect(
         while let Some(cmd) = queue.recv().await {
             let bye = cmd == "exit";
             if writer
-                .write_all(format!("{cmd}\r\n").as_bytes())
+                .write_all(format!("{cmd}\n").as_bytes())
                 .await
                 .is_err()
                 || bye
@@ -130,9 +139,12 @@ pub async fn connect(
 
 /// Answers the `Login:` and `Password:` prompts. Returns whatever arrived
 /// after the first command prompt, to be read as ordinary lines.
+/// Everything received is also added to `transcript`, so a failure can say
+/// what the server said last.
 async fn sign_in(
     stream: &mut TcpStream,
     credentials: &Credentials,
+    transcript: &mut String,
 ) -> Result<Vec<u8>, AdapterError> {
     let net = |e: std::io::Error| AdapterError::Network(e.to_string());
     let mut seen = String::new();
@@ -141,11 +153,14 @@ async fn sign_in(
     loop {
         let n = stream.read(&mut buf).await.map_err(net)?;
         if n == 0 {
-            return Err(AdapterError::Network(
-                "Pandanet closed the connection while signing in".into(),
-            ));
+            return Err(AdapterError::Network(format!(
+                "Pandanet closed the connection while signing in{}",
+                last_words(transcript, &credentials.password)
+            )));
         }
-        seen.push_str(&String::from_utf8_lossy(&buf[..n]));
+        let text = String::from_utf8_lossy(&buf[..n]);
+        transcript.push_str(&text);
+        seen.push_str(&text);
         match stage::next(stage, &seen) {
             Step::Wait => {}
             Step::Send(next, what) => {
@@ -154,7 +169,7 @@ async fn sign_in(
                     Field::Password => &credentials.password,
                 };
                 stream
-                    .write_all(format!("{text}\r\n").as_bytes())
+                    .write_all(format!("{text}\n").as_bytes())
                     .await
                     .map_err(net)?;
                 stage = next;
@@ -164,6 +179,67 @@ async fn sign_in(
             Step::Fail(e) => return Err(e),
         }
     }
+}
+
+/// The last couple of lines the server sent, for an error message. Telnet
+/// control bytes are dropped and the password never appears.
+fn last_words(transcript: &str, password: &str) -> String {
+    let clean: String = transcript
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .filter(|c| *c != '\u{fffd}')
+        .collect();
+    let mut clean = clean;
+    if !password.is_empty() {
+        clean = clean.replace(password, "•••");
+    }
+    let lines: Vec<&str> = clean
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return " before saying anything".into();
+    }
+    let tail = lines[lines.len().saturating_sub(2)..].join(" / ");
+    let tail: String = tail.chars().take(200).collect();
+    format!(". It last said: \u{201c}{tail}\u{201d}")
+}
+
+/// Signs in, waits a few seconds, and returns everything the server sent.
+/// For diagnosing sign-in problems (`cargo run -p tengen-igs --example igs_login`).
+pub async fn sign_in_transcript(
+    host: &str,
+    port: u16,
+    credentials: &Credentials,
+) -> (Result<(), AdapterError>, String) {
+    let mut transcript = String::new();
+    let mut stream = match TcpStream::connect((host, port)).await {
+        Ok(s) => s,
+        Err(e) => return (Err(AdapterError::Network(e.to_string())), transcript),
+    };
+    let result = tokio::time::timeout(
+        Duration::from_secs(25),
+        sign_in(&mut stream, credentials, &mut transcript),
+    )
+    .await;
+    let result = match result {
+        Err(_) => Err(AdapterError::Network("timed out".into())),
+        Ok(r) => r.map(|_| ()),
+    };
+    if result.is_ok() {
+        let _ = stream.write_all(b"toggle client true\n").await;
+        let mut buf = vec![0u8; 8192];
+        let until = tokio::time::Instant::now() + Duration::from_secs(4);
+        while let Ok(Ok(n)) = tokio::time::timeout_at(until, stream.read(&mut buf)).await {
+            if n == 0 {
+                break;
+            }
+            transcript.push_str(&String::from_utf8_lossy(&buf[..n]));
+        }
+        let _ = stream.write_all(b"exit\n").await;
+    }
+    (result, transcript.replace(&credentials.password, "•••"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -306,6 +382,15 @@ mod tests {
             stage::next(Stage::Prompt, "Last login"),
             Step::Wait
         ));
+    }
+
+    #[test]
+    fn errors_quote_the_server_without_the_password() {
+        let said = "Welcome\r\n\u{ff}\u{fb}\u{1}Password: \r\nSorry, hunter2 is wrong\r\n";
+        let words = last_words(said, "hunter2");
+        assert!(words.contains("Sorry, ••• is wrong"), "{words}");
+        assert!(!words.contains("hunter2"));
+        assert_eq!(last_words("", "x"), " before saying anything");
     }
 
     #[test]

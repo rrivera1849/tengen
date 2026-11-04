@@ -9,3 +9,6 @@ license.workspace = true
 tengen-core.workspace = true
 regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
 tokio = { workspace = true, features = ["net", "io-util", "sync", "time", "rt"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
