@@ -1,6 +1,7 @@
-import { api, onEvents, previewClock, type OgsStatus, type Speed, type View } from "./api";
+import { api, onEvents, previewClock, type Color, type OgsStatus, type Speed, type View } from "./api";
 import { BoardView, type Look, type StoneStyle, type Texture } from "./board";
 import { setClock } from "./clock";
+import * as panel from "./review";
 import { click } from "./sound";
 
 interface Settings extends Look {
@@ -48,9 +49,20 @@ function mode(v: View): Mode {
   return "live";
 }
 
+/** The score estimate stays on (and follows the game) until E or Esc. */
+let estimateOn = false;
+/** The turn a lesson's better line belongs to; moving away hides the line. */
+let lineTurn: number | null = null;
+
 function show(v: View) {
   const placed = view && v.total > view.total && v.cursor === v.total && !v.lastWasPass;
+  const moved = !view || view.cursor !== v.cursor || view.total !== v.total;
   view = v;
+  if (moved && lineTurn !== null && v.cursor !== lineTurn) {
+    lineTurn = null;
+    board.setLine(null);
+  }
+  panel.setCursor(v.cursor);
   const m = mode(v);
   board.interactive = m === "review" || (m === "live" && v.toMove === v.live?.myColor);
   board.update(v);
@@ -77,7 +89,152 @@ function show(v: View) {
   if (v.lastWasPass && v.cursor === v.total && m !== "scoring") {
     notify(`${v.toMove === "black" ? "White" : "Black"} passed`);
   }
+  if (estimateOn && moved) refreshEstimate();
 }
+
+// ---------- score estimate ----------
+
+let estimateRun = 0;
+
+async function refreshEstimate() {
+  const run = ++estimateRun;
+  try {
+    const e = await api.estimate();
+    if (run !== estimateRun || !estimateOn) return;
+    board.setEstimate(e);
+    $("#result").textContent = e.headline;
+  } catch (err) {
+    if (run === estimateRun) {
+      setEstimate(false);
+      notify(explain(err));
+    }
+  }
+}
+
+async function setEstimate(on: boolean) {
+  if (on && !(await ensureKatago())) return;
+  estimateOn = on;
+  $("#estimate-button").setAttribute("aria-pressed", String(on));
+  if (on) {
+    $("#result").textContent = "Estimating";
+    refreshEstimate();
+  } else {
+    estimateRun++;
+    board.setEstimate(null);
+    if (view) $("#result").textContent = view.cursor === view.total && view.result ? view.result : "";
+  }
+}
+
+// ---------- KataGo, keys and reviews ----------
+
+/** Opens a dialog and resolves with the button the player chose. */
+function ask(id: string): Promise<string> {
+  const d = dialog(id);
+  return new Promise((resolve) => {
+    d.addEventListener("close", () => resolve(d.returnValue), { once: true });
+    d.returnValue = "";
+    d.showModal();
+  });
+}
+
+async function ensureKatago(): Promise<boolean> {
+  const status = await api.aiStatus().catch(() => null);
+  if (status?.katago) return true;
+  $("#katago-progress").textContent = "";
+  if ((await ask("katago-dialog")) !== "download") return false;
+  // Reopen the dialog as a progress view until the download finishes.
+  const d = dialog("katago-dialog");
+  const row = d.querySelector<HTMLElement>(".row")!;
+  row.hidden = true;
+  $("#katago-progress").textContent = "Starting the download";
+  d.showModal();
+  try {
+    await api.installKatago();
+    notify("KataGo is ready");
+    return true;
+  } catch (e) {
+    notify(explain(e));
+    return false;
+  } finally {
+    d.close();
+    row.hidden = false;
+  }
+}
+
+async function startReview() {
+  if (!view) return;
+  if (view.live && view.live.phase !== "finished") return notify("Reviews open once the game is over");
+  if (view.total < 10) return notify("This game is too short to review");
+  if (!(await ensureKatago())) return;
+  let you: Color | null = await api.reviewSide().catch(() => null);
+  if (!you) {
+    $("#side-black").textContent = `Black, ${view.black}`;
+    $("#side-white").textContent = `White, ${view.white}`;
+    const choice = await ask("side-dialog");
+    if (choice !== "black" && choice !== "white") return;
+    you = choice;
+  }
+  setEstimate(false);
+  panel.showWorking();
+  try {
+    const r = await api.startReview(you);
+    panel.showReview(r, view?.cursor ?? 0);
+  } catch (e) {
+    panel.close();
+    notify(explain(e));
+  }
+}
+
+async function editKey() {
+  const status = await api.aiStatus().catch(() => null);
+  $<HTMLInputElement>("#key-input").value = "";
+  $("#key-remove").hidden = !status?.apiKey;
+  const choice = await ask("key-dialog");
+  if (choice === "save") {
+    await run(() => api.setClaudeKey($<HTMLInputElement>("#key-input").value), () => {
+      notify("API key saved. Run the review again for written lessons");
+    });
+  }
+  if (choice === "remove") await run(api.clearClaudeKey, () => notify("API key removed"));
+}
+
+async function showMaxims() {
+  const groups = await api.maxims().catch(() => []);
+  const list = $("#maxims-list");
+  list.replaceChildren();
+  if (!groups.length) {
+    const p = document.createElement("p");
+    p.className = "lede";
+    p.textContent = "Maxims from your reviews will collect here.";
+    list.append(p);
+  }
+  for (const [kind, maxims] of groups) {
+    const h = document.createElement("p");
+    h.className = "group-label";
+    h.textContent = kind;
+    const ul = document.createElement("ul");
+    ul.className = "maxim-list";
+    for (const m of maxims) {
+      const li = document.createElement("li");
+      li.textContent = m;
+      ul.append(li);
+    }
+    list.append(h, ul);
+  }
+  await ask("maxims-dialog");
+}
+
+panel.initPanel({
+  open: (turn, line) => {
+    runView(() => api.goTo(turn)).then(() => {
+      lineTurn = turn;
+      board.setLine(line);
+    });
+  },
+  jump: (turn) => runView(() => api.goTo(turn)),
+  addKey: () => editKey(),
+  showMaxims: () => showMaxims(),
+});
 
 function mine(v: View, color: "black" | "white") {
   return v.live?.myColor === color ? "you" : null;
@@ -133,6 +290,8 @@ const actions: Record<string, () => void> = {
     dialog("ogs-dialog").showModal();
   },
   pass: () => runView(api.pass),
+  estimate: () => setEstimate(!estimateOn),
+  review: () => startReview(),
   online: () => openOnline(),
   resign: () => dialog("resign-dialog").showModal(),
   accept: () => run(api.acceptScore, () => notify("Score accepted. Waiting for your opponent")),
@@ -288,6 +447,17 @@ window.addEventListener("keydown", (e) => {
     d: actions.ogs,
     l: actions.online,
   };
+  if (!cmd && (e.key === "e" || e.key === "E")) return void actions.estimate();
+  if (!cmd && (e.key === "r" || e.key === "R")) return void actions.review();
+  if (!cmd && (e.key === "p" || e.key === "P")) return void actions.pass();
+  if (e.key === "Escape") {
+    if (lineTurn !== null) {
+      lineTurn = null;
+      board.setLine(null);
+    } else if (estimateOn) setEstimate(false);
+    else if (panel.isOpen()) panel.close();
+    return;
+  }
   const handler = cmd ? cmdKeys[e.key.toLowerCase()] : keys[e.key];
   if (handler) {
     e.preventDefault();
@@ -302,6 +472,13 @@ onEvents({
   ogs: showOgs,
   clock: (c) => (view?.live?.gameId === c.gameId ? setClock(c) : undefined),
   notice: notify,
+  progress: (p) => {
+    if (p.stage === "download") {
+      const mb = (n: number) => Math.round(n / 1e6);
+      $("#katago-progress").textContent = p.total ? `${mb(p.done)} of ${mb(p.total)} MB` : `${mb(p.done)} MB`;
+    }
+    panel.showProgress(p);
+  },
 });
 
 runView(api.current).then(() => {

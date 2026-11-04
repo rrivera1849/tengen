@@ -21,6 +21,23 @@ pub fn save_ogs(tokens: &Tokens) -> Result<(), String> {
         .map_err(|e| format!("couldn't save the sign-in to Keychain: {e}"))
 }
 
+pub fn load_claude_key() -> Option<String> {
+    entry("claude-api-key")?.get_password().ok().filter(|k| !k.trim().is_empty())
+}
+
+pub fn save_claude_key(key: &str) -> Result<(), String> {
+    entry("claude-api-key")
+        .ok_or("Keychain isn't available")?
+        .set_password(key.trim())
+        .map_err(|e| format!("couldn't save the API key to Keychain: {e}"))
+}
+
+pub fn forget_claude_key() {
+    if let Some(e) = entry("claude-api-key") {
+        let _ = e.delete_credential();
+    }
+}
+
 pub fn forget_ogs() {
     if let Some(e) = entry("ogs") {
         let _ = e.delete_credential();

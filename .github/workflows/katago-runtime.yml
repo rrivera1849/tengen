@@ -1,0 +1,83 @@
+name: KataGo runtime
+
+# Builds KataGo for Apple Silicon with its Metal backend (KataGo publishes no
+# Mac binaries), adds a network, and publishes both as the `katago-runtime`
+# release with a manifest of SHA-256 checksums. Tengen downloads from there.
+# Run it by hand from the Actions tab when KataGo or the network should change.
+
+on:
+  workflow_dispatch:
+    inputs:
+      katago_tag:
+        description: KataGo release tag to build
+        default: v1.16.5
+      model_url:
+        description: Network to bundle (.bin.gz). Empty picks the latest b18 network from katagotraining.org.
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install ninja
+
+      - name: Build KataGo with Metal
+        run: |
+          git clone --depth 1 --branch "${{ inputs.katago_tag }}" https://github.com/lightvector/KataGo katago-src
+          cd katago-src/cpp
+          cmake -G Ninja -DUSE_BACKEND=METAL -DNO_GIT_REVISION=1 -DCMAKE_BUILD_TYPE=Release .
+          ninja katago
+          # Everything it links should ship with macOS.
+          otool -L katago
+
+      - name: Fetch the network
+        run: |
+          url="${{ inputs.model_url }}"
+          if [ -z "$url" ]; then
+            url=$(curl -fsSL https://katagotraining.org/networks/ \
+              | grep -o 'https://media.katagotraining.org/uploaded/networks/models/kata1/kata1-b18c384nbt-[^"]*\.bin\.gz' \
+              | head -1)
+          fi
+          if [ -z "$url" ]; then
+            echo "Couldn't find a b18 network; run again with model_url set." >&2
+            exit 1
+          fi
+          echo "MODEL_URL=$url" >> "$GITHUB_ENV"
+          curl -fL "$url" -o model.bin.gz
+
+      - name: Smoke test
+        run: |
+          mkdir -p logs
+          printf 'logDir = logs\nreportAnalysisWinratesAs = BLACK\nmaxVisits = 20\nnumAnalysisThreads = 1\nnumSearchThreadsPerAnalysisThread = 4\n' > smoke.cfg
+          echo '{"id":"smoke","moves":[["B","E5"]],"rules":"japanese","komi":7,"boardXSize":9,"boardYSize":9,"maxVisits":20}' \
+            | timeout 1500 ./katago-src/cpp/katago analysis -config smoke.cfg -model model.bin.gz > answer.json
+          cat answer.json
+          grep -q '"rootInfo"' answer.json
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp katago-src/cpp/katago katago
+          base="https://github.com/${{ github.repository }}/releases/download/katago-runtime"
+          sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+          cat > manifest.json <<EOF
+          {
+            "version": "${{ inputs.katago_tag }}",
+            "files": [
+              { "name": "katago", "url": "$base/katago", "sha256": "$(sha katago)", "executable": true },
+              { "name": "model.bin.gz", "url": "$base/model.bin.gz", "sha256": "$(sha model.bin.gz)" }
+            ]
+          }
+          EOF
+          cat manifest.json
+          gh release delete katago-runtime --yes --cleanup-tag || true
+          gh release create katago-runtime katago model.bin.gz manifest.json \
+            --title "KataGo runtime" --latest=false \
+            --notes "KataGo ${{ inputs.katago_tag }} built with the Metal backend for Apple Silicon, with the network from $MODEL_URL. Tengen downloads these on first use."

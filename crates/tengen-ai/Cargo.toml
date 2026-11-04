@@ -1,0 +1,21 @@
+[package]
+name = "tengen-ai"
+description = "KataGo analysis, score estimates and AI reviews for Tengen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tengen-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "fs", "macros", "rt-multi-thread"] }

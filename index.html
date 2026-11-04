@@ -37,10 +37,10 @@
       <!-- The bar shows one set of actions at a time: reviewing, playing live, or scoring. -->
       <footer class="bar" data-mode="review">
         <div class="actions" data-for="review">
-          <button data-action="new">New game</button>
+          <button data-action="new">New</button>
           <button data-action="open">Open</button>
-          <button data-action="ogs">From OGS</button>
-          <button data-action="save">Save SGF</button>
+          <button data-action="ogs">OGS game</button>
+          <button data-action="save">Save</button>
         </div>
         <div class="actions" data-for="live">
           <button data-action="pass">Pass</button>
@@ -51,7 +51,7 @@
           <button data-action="resign">Resign</button>
         </div>
         <div class="actions" data-for="finished">
-          <button data-action="save">Save SGF</button>
+          <button data-action="save">Save</button>
           <button data-action="leave">Done</button>
         </div>
         <div class="scrub">
@@ -59,8 +59,9 @@
           <span id="move-count">Start</span>
         </div>
         <div class="actions end">
-          <button data-action="pass" data-for="review">Pass</button>
-          <button data-action="online" data-for="review finished">Play online</button>
+          <button data-action="estimate" id="estimate-button" aria-pressed="false">Estimate</button>
+          <button data-action="review" data-for="review finished">Review</button>
+          <button data-action="online" data-for="review finished">Online</button>
           <button data-action="look">Board</button>
         </div>
       </footer>
@@ -73,6 +74,8 @@
 
       <p class="notice" id="notice" role="status" aria-live="polite"></p>
     </main>
+
+    <aside class="review" id="review" aria-label="Review"></aside>
 
     <dialog id="new-dialog">
       <form method="dialog">
@@ -148,6 +151,52 @@
           <button class="quiet" value="cancel" autofocus>Keep playing</button>
           <button value="resign" class="primary">Resign</button>
         </div>
+      </form>
+    </dialog>
+
+    <dialog id="katago-dialog">
+      <form method="dialog">
+        <h2>Download KataGo</h2>
+        <p class="lede">Score estimates and reviews use KataGo, the open-source Go engine, running on your Mac. It's a one-time download of the engine and its network.</p>
+        <p class="hint" id="katago-progress"></p>
+        <div class="row">
+          <button class="quiet" value="cancel">Not now</button>
+          <button value="download" class="primary" id="katago-download">Download</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="key-dialog">
+      <form method="dialog">
+        <h2>Claude API key</h2>
+        <p class="lede">Lessons are written by Claude from facts KataGo has checked. Create a key at console.anthropic.com and paste it here. It's kept in your Mac's Keychain, and only positions and KataGo's facts are sent, never names.</p>
+        <label for="key-input">API key</label>
+        <input id="key-input" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+        <div class="row">
+          <button class="link" value="remove" id="key-remove">Remove key</button>
+          <button class="quiet" value="cancel">Cancel</button>
+          <button value="save" class="primary">Save key</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="side-dialog">
+      <form method="dialog">
+        <h2>Which side were you?</h2>
+        <p class="lede">The review points out your mistakes and the ones your opponent made.</p>
+        <div class="choices">
+          <button value="black" id="side-black">Black</button>
+          <button value="white" id="side-white">White</button>
+        </div>
+        <button class="quiet" value="cancel">Cancel</button>
+      </form>
+    </dialog>
+
+    <dialog id="maxims-dialog">
+      <form method="dialog">
+        <h2>Your maxims</h2>
+        <div id="maxims-list"></div>
+        <button class="quiet" value="close">Done</button>
       </form>
     </dialog>
 

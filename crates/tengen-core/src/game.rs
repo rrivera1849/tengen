@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::board::{Board, Color, MoveError, Point};
@@ -40,6 +42,8 @@ pub struct GameInfo {
 #[derive(Debug, Clone)]
 pub struct Game {
     pub info: GameInfo,
+    /// Comments by node: 0 is the root, `n` is the node of move `n`.
+    pub comments: BTreeMap<usize, String>,
     moves: Vec<(Color, Move)>,
     cursor: usize,
     board: Board,
@@ -52,7 +56,7 @@ impl Game {
 
     pub fn from_info(info: GameInfo) -> Self {
         let board = Self::setup_board(&info);
-        Game { info, moves: Vec::new(), cursor: 0, board }
+        Game { info, comments: BTreeMap::new(), moves: Vec::new(), cursor: 0, board }
     }
 
     pub fn board(&self) -> &Board {
@@ -104,6 +108,9 @@ impl Game {
             }
         };
         self.moves.truncate(self.cursor);
+        // Comments on replaced moves no longer belong to anything.
+        let keep = self.cursor;
+        self.comments.retain(|node, _| *node <= keep);
         self.moves.push((color, mv));
         self.cursor += 1;
         Ok(captured)

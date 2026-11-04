@@ -6,6 +6,19 @@ import type { Color, View } from "./api";
 export type Texture = "kaya" | "shinkaya" | "bamboo" | "ink";
 export type StoneStyle = "shell" | "flat";
 
+/** A score estimate's marks: owned points and dead stones. */
+export interface Overlay {
+  territory: [number, number, Color][];
+  dead: [number, number][];
+}
+
+/** A better line to draw: the mover's color first. */
+export interface Line {
+  played: [number, number] | null;
+  line: [number, number][];
+  color: Color;
+}
+
 export interface Look {
   texture: Texture;
   stones: StoneStyle;
@@ -82,6 +95,21 @@ export class BoardView {
   /** False while it's the opponent's turn in a live game, or during scoring. */
   interactive = true;
 
+  private estimate: Overlay | null = null;
+  private line: Line | null = null;
+
+  /** Shows (or with null, hides) who owns what. */
+  setEstimate(e: Overlay | null) {
+    this.estimate = e;
+    this.render();
+  }
+
+  /** Shows (or with null, hides) a better line as numbered ghost stones. */
+  setLine(l: Line | null) {
+    this.line = l;
+    this.render();
+  }
+
   private track(e: PointerEvent) {
     if (!this.interactive) return this.setHover(null);
     const p = this.pointAt(e);
@@ -105,12 +133,53 @@ export class BoardView {
     this.svg.dataset.texture = this.look.texture;
     this.svg.replaceChildren(this.defs(), this.wood(m, span), this.grid(n));
     if (this.look.coords) this.svg.append(this.coordinates(n, m));
-    const dead = new Set((v.live?.removed ?? []).map(([x, y]) => `${x},${y}`));
+    const deadList = [...(v.live?.removed ?? []), ...(this.estimate?.dead ?? [])];
+    const dead = new Set(deadList.map(([x, y]) => `${x},${y}`));
     for (const [x, y, c] of v.stones) {
       this.svg.append(this.stone(x, y, c, dead.has(`${x},${y}`) ? "stone dead" : "stone"));
     }
-    if (v.last) this.svg.append(this.lastMark(v.last, v.stones));
+    if (this.estimate) this.svg.append(this.territory(this.estimate));
+    if (v.last && !this.line) this.svg.append(this.lastMark(v.last, v.stones));
+    if (this.line) this.svg.append(this.ghostLine(this.line));
     this.hover = null;
+  }
+
+  private territory(e: Overlay) {
+    const g = svg("g", { class: "territory" });
+    for (const [x, y, c] of e.territory) {
+      const s = 0.34;
+      g.append(svg("rect", {
+        x: String(x - s / 2), y: String(y - s / 2), width: String(s), height: String(s), rx: "0.04",
+        class: c,
+      }));
+    }
+    return g;
+  }
+
+  /** The move played (a ring) and the better line, numbered from 1. */
+  private ghostLine(l: Line) {
+    const g = svg("g", { class: "better-line" });
+    if (l.played) {
+      g.append(svg("circle", { class: "played", cx: String(l.played[0]), cy: String(l.played[1]), r: "0.3" }));
+    }
+    let color = l.color;
+    const used = new Set<string>();
+    l.line.forEach(([x, y], i) => {
+      const key = `${x},${y}`;
+      if (!used.has(key)) {
+        used.add(key);
+        const stone = this.stone(x, y, color, "line-stone");
+        const label = svg("text", {
+          x: String(x), y: String(y), "text-anchor": "middle", "dominant-baseline": "central",
+          class: color === "black" ? "on-black" : "on-white",
+        });
+        label.textContent = String(i + 1);
+        stone.append(label);
+        g.append(stone);
+      }
+      color = color === "black" ? "white" : "black";
+    });
+    return g;
   }
 
   private defs() {

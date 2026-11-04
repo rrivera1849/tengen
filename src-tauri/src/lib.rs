@@ -1,6 +1,7 @@
 //! The Tauri layer: commands the interface calls, plus the live OGS
 //! connection. Game logic lives in the crates; this file only wires them up.
 
+mod ai;
 mod keychain;
 mod live;
 
@@ -297,6 +298,59 @@ fn accept_score(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- score estimate and AI review ----------
+
+#[tauri::command]
+fn ai_status(app: AppHandle) -> ai::AiStatus {
+    ai::status(&app)
+}
+
+#[tauri::command]
+async fn ai_install(app: AppHandle) -> Result<ai::AiStatus, String> {
+    ai::install(&app).await
+}
+
+/// Allowed in your own live games too: it shows score and territory, never moves.
+#[tauri::command]
+async fn estimate_score(app: AppHandle) -> Result<tengen_ai::estimate::Estimate, String> {
+    ai::estimate(&app).await
+}
+
+/// Which side you played, when Tengen can tell from the live game or your OGS name.
+#[tauri::command]
+fn review_side(app: AppHandle) -> Option<Color> {
+    ai::guess_you(&app)
+}
+
+#[tauri::command]
+async fn start_review(app: AppHandle, state: State<'_, AppState>, you: Color) -> Result<ai::ReviewView, String> {
+    if live_game(&state).is_some_and(|(_, g)| g.phase != "finished") {
+        return Err("Reviews open once the game is over".into());
+    }
+    ai::review(&app, you).await
+}
+
+#[tauri::command]
+fn set_claude_key(app: AppHandle, key: String) -> Result<ai::AiStatus, String> {
+    let key = key.trim();
+    if !key.starts_with("sk-ant-") {
+        return Err("That doesn't look like a Claude API key (they start with sk-ant-)".into());
+    }
+    keychain::save_claude_key(key)?;
+    Ok(ai::status(&app))
+}
+
+#[tauri::command]
+fn clear_claude_key(app: AppHandle) -> ai::AiStatus {
+    keychain::forget_claude_key();
+    ai::status(&app)
+}
+
+#[tauri::command]
+fn list_maxims(app: AppHandle) -> Vec<(String, Vec<String>)> {
+    ai::maxims(&app)
+}
+
 #[tauri::command]
 fn leave_game(state: State<'_, AppState>) -> View {
     live::close_game(&state);
@@ -316,6 +370,7 @@ pub fn run() {
             ogs: Mutex::new(OgsAdapter::default()),
             live: Mutex::new(None),
         })
+        .manage(ai::AiState::default())
         .setup(|app| {
             // Reconnect with the sign-in saved in Keychain, if there is one.
             let handle = app.handle().clone();
@@ -324,7 +379,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             current, new_game, play, pass_turn, undo, go_to, open_sgf, save_sgf, download_ogs,
-            ogs_status, ogs_sign_in, ogs_sign_out, find_match, cancel_match, resign, accept_score, leave_game
+            ogs_status, ogs_sign_in, ogs_sign_out, find_match, cancel_match, resign, accept_score, leave_game,
+            ai_status, ai_install, estimate_score, review_side, start_review, set_claude_key, clear_claude_key, list_maxims
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tengen");

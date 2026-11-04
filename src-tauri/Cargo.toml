@@ -20,6 +20,7 @@ serde.workspace = true
 serde_json.workspace = true
 tengen-core.workspace = true
 tengen-ogs.workspace = true
+tengen-ai.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # Sign-in tokens live in the macOS Keychain (and Windows Credential Manager later).

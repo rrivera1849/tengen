@@ -76,6 +76,7 @@ pub fn parse(text: &str) -> Result<Game, SgfError> {
 
     let mut game = Game::from_info(info);
     for node in &nodes {
+        let comment = node.iter().find(|(k, _)| k == "C").and_then(|(_, v)| v.first().cloned());
         for (key, values) in node {
             let color = match key.as_str() {
                 "B" => Color::Black,
@@ -87,6 +88,9 @@ pub fn parse(text: &str) -> Result<Game, SgfError> {
                 None => Move::Pass,
             };
             game.play_record(color, mv);
+        }
+        if let Some(c) = comment.filter(|c| !c.trim().is_empty()) {
+            game.comments.insert(game.moves().len(), c);
         }
     }
     Ok(game)
@@ -114,6 +118,9 @@ pub fn write(game: &Game) -> String {
             }
         }
     }
+    if let Some(c) = game.comments.get(&0) {
+        out.push_str(&format!("C[{}]", escape(c)));
+    }
     for (n, (color, mv)) in game.moves().iter().enumerate() {
         if n % 10 == 0 {
             out.push('\n');
@@ -124,6 +131,9 @@ pub fn write(game: &Game) -> String {
             Move::Pass => String::new(),
         };
         out.push_str(&format!(";{key}[{value}]"));
+        if let Some(c) = game.comments.get(&(n + 1)) {
+            out.push_str(&format!("\nC[{}]\n", escape(c)));
+        }
     }
     out.push_str(")\n");
     out
@@ -367,6 +377,16 @@ mod tests {
         assert_eq!(g.info.white.as_deref(), Some("a ] b"));
         assert_eq!(g.moves(), &[(Color::White, Move::Pass), (Color::Black, Move::Pass)]);
         assert!(write(&g).contains(r"PW[a \] b]"));
+    }
+
+    #[test]
+    fn keeps_comments_on_their_moves() {
+        let mut g = parse("(;SZ[9]C[root note];B[ee];W[cc]C[a [quoted\\] lesson])").unwrap();
+        assert_eq!(g.comments.get(&0).map(String::as_str), Some("root note"));
+        assert_eq!(g.comments.get(&2).map(String::as_str), Some("a [quoted] lesson"));
+        g.comments.insert(1, "Black's first move".into());
+        let again = parse(&write(&g)).unwrap();
+        assert_eq!(again.comments, g.comments);
     }
 
     #[test]
