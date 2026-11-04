@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tengen</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div class="titlebar" data-tauri-drag-region></div>
+
+    <main class="stage">
+      <header class="players">
+        <div class="player black">
+          <span class="dot" aria-hidden="true"></span>
+          <div>
+            <p class="name" id="black-name">Black</p>
+            <p class="meta" id="black-meta"></p>
+          </div>
+        </div>
+        <p class="result" id="result"></p>
+        <div class="player white">
+          <div>
+            <p class="name" id="white-name">White</p>
+            <p class="meta" id="white-meta"></p>
+          </div>
+          <span class="dot" aria-hidden="true"></span>
+        </div>
+      </header>
+
+      <div class="board-wrap">
+        <svg id="board" role="img" aria-label="Go board"></svg>
+      </div>
+
+      <footer class="bar">
+        <div class="actions">
+          <button data-action="new">New game</button>
+          <button data-action="open">Open</button>
+          <button data-action="ogs">From OGS</button>
+          <button data-action="save">Save SGF</button>
+        </div>
+        <div class="scrub">
+          <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Move" />
+          <span id="move-count">Start</span>
+        </div>
+        <div class="actions end">
+          <button data-action="pass">Pass</button>
+          <button data-action="look">Board</button>
+        </div>
+      </footer>
+
+      <p class="notice" id="notice" role="status" aria-live="polite"></p>
+    </main>
+
+    <dialog id="new-dialog">
+      <form method="dialog">
+        <h2>New game</h2>
+        <div class="choices" role="radiogroup" aria-label="Board size">
+          <button value="9">9 × 9</button>
+          <button value="13">13 × 13</button>
+          <button value="19" autofocus>19 × 19</button>
+        </div>
+        <button class="quiet" value="cancel">Cancel</button>
+      </form>
+    </dialog>
+
+    <dialog id="ogs-dialog">
+      <form method="dialog">
+        <h2>Game from OGS</h2>
+        <label for="ogs-input">Game number or link</label>
+        <input id="ogs-input" name="game" placeholder="online-go.com/game/12345" autocomplete="off" spellcheck="false" />
+        <div class="row">
+          <button class="quiet" value="cancel">Cancel</button>
+          <button value="review">Review</button>
+          <button value="download" class="primary">Download SGF</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="look-dialog">
+      <form method="dialog">
+        <h2>Board</h2>
+        <p class="group-label">Wood</p>
+        <div class="choices" data-setting="texture">
+          <button value="kaya">Kaya</button>
+          <button value="shinkaya">Shin-kaya</button>
+          <button value="bamboo">Bamboo</button>
+          <button value="ink">Ink on paper</button>
+        </div>
+        <p class="group-label">Stones</p>
+        <div class="choices" data-setting="stones">
+          <button value="shell">Shell and slate</button>
+          <button value="flat">Flat</button>
+        </div>
+        <p class="group-label">Details</p>
+        <div class="choices" data-setting="toggles">
+          <button value="coords">Coordinates</button>
+          <button value="sound">Stone sound</button>
+        </div>
+        <button class="quiet" value="close">Done</button>
+      </form>
+    </dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,352 @@
+:root {
+  --room: #dcdfda;        /* lichen gray: the room the board sits in */
+  --ink: #1f2422;         /* sumi ink */
+  --quiet: #6a716d;       /* moss gray for secondary words */
+  --line: #c4c9c3;
+  --raised: #eef0ec;
+  --indigo: #2f4c7e;      /* ai-zome: the one accent */
+  --board-shadow: 0 28px 60px -28px rgb(30 24 12 / 0.45), 0 2px 6px rgb(30 24 12 / 0.12);
+
+  --serif: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", "Iowan Old Style", Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --room: #161a19;
+    --ink: #dfe2de;
+    --quiet: #8c938f;
+    --line: #2c3230;
+    --raised: #1f2423;
+    --indigo: #8fa8d8;
+    --board-shadow: 0 28px 60px -24px rgb(0 0 0 / 0.7), 0 2px 6px rgb(0 0 0 / 0.4);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--room);
+  color: var(--ink);
+  font: 13px/1.4 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+
+/* The window's traffic lights sit over this transparent strip. */
+.titlebar {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 28px;
+  z-index: 10;
+}
+
+/* --b is the board's side: everything above and below it shares that width. */
+.stage {
+  --b: min(calc(100vw - 48px), calc(100vh - 168px));
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  align-content: center;
+  justify-items: center;
+  padding: 28px 24px 12px;
+  gap: 14px;
+}
+
+/* ---------- players ---------- */
+
+.players {
+  width: var(--b);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+}
+
+.player {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0.55;
+  transition: opacity 200ms ease;
+}
+
+.player.to-move {
+  opacity: 1;
+}
+
+.player.white {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.player .dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.player.black .dot {
+  background: radial-gradient(circle at 36% 32%, #5b605e, #121413 70%);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--ink) 30%, transparent);
+}
+
+.player.white .dot {
+  background: radial-gradient(circle at 38% 32%, #fff, #c9c8c1 85%);
+  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.25);
+}
+
+.name {
+  margin: 0;
+  font: 500 17px/1.2 var(--serif);
+  letter-spacing: 0.01em;
+}
+
+.meta {
+  margin: 2px 0 0;
+  color: var(--quiet);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-height: 1.4em;
+}
+
+.result {
+  margin: 0;
+  font: 500 15px var(--serif);
+  color: var(--indigo);
+}
+
+/* ---------- board ---------- */
+
+.board-wrap {
+  display: grid;
+  place-items: center;
+}
+
+#board {
+  display: block;
+  width: var(--b);
+  height: var(--b);
+  border-radius: 6px;
+  box-shadow: var(--board-shadow);
+  cursor: pointer;
+}
+
+#board .ghost {
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+#board .stone circle {
+  animation: settle 140ms ease-out;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes settle {
+  from {
+    opacity: 0.4;
+    transform: scale(1.06);
+  }
+}
+
+#board .last.on-black {
+  stroke: #e9ecf4;
+}
+
+#board .last.on-white {
+  stroke: #2f4c7e;
+}
+
+#board .coords text {
+  font: 0.36px var(--sans);
+  fill: #4a3618;
+  opacity: 0.7;
+}
+
+#board[data-texture="ink"] .coords text {
+  fill: #2a2e2c;
+}
+
+/* ---------- bottom bar ---------- */
+
+.bar {
+  width: var(--b);
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  opacity: 0.6;
+  transition: opacity 200ms ease;
+}
+
+.bar:hover,
+.bar:focus-within {
+  opacity: 1;
+}
+
+.actions {
+  display: flex;
+  gap: 0;
+  white-space: nowrap;
+  margin-inline: -9px; /* button text lines up with the board's edge */
+}
+
+.actions.end {
+  justify-content: flex-end;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--indigo);
+  outline-offset: 1px;
+}
+
+.scrub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scrub span {
+  color: var(--quiet);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 9ch;
+}
+
+input[type="range"] {
+  flex: 1;
+  accent-color: var(--indigo);
+}
+
+.notice {
+  position: fixed;
+  left: 50%;
+  bottom: 64px;
+  margin: 0;
+  transform: translate(-50%, 6px);
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--room);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.notice.on {
+  opacity: 0.92;
+  transform: translate(-50%, 0);
+}
+
+/* ---------- dialogs ---------- */
+
+dialog {
+  border: 0;
+  border-radius: 12px;
+  padding: 22px 22px 16px;
+  width: min(380px, calc(100vw - 32px));
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.45);
+}
+
+dialog::backdrop {
+  background: rgb(20 24 22 / 0.28);
+}
+
+dialog h2 {
+  margin: 0 0 14px;
+  font: 500 18px var(--serif);
+}
+
+dialog label,
+.group-label {
+  display: block;
+  margin: 14px 0 6px;
+  color: var(--quiet);
+  font-size: 12px;
+}
+
+dialog input {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--room);
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.choices button {
+  border: 1px solid var(--line);
+  padding: 7px 12px;
+}
+
+.choices button[aria-pressed="true"] {
+  border-color: var(--indigo);
+  color: var(--indigo);
+  background: color-mix(in srgb, var(--indigo) 9%, transparent);
+}
+
+.row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 18px;
+}
+
+button.primary {
+  background: var(--ink);
+  color: var(--raised);
+}
+
+button.primary:hover {
+  background: color-mix(in srgb, var(--ink) 85%, var(--indigo));
+}
+
+button.quiet {
+  color: var(--quiet);
+  margin-top: 14px;
+}
+
+.row button.quiet {
+  margin: 0 auto 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

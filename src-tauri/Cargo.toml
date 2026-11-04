@@ -1,0 +1,21 @@
+[package]
+name = "tengen"
+description = "A calm place to play and review Go on any server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "tengen_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde.workspace = true
+serde_json.workspace = true
+tengen-core.workspace = true
+tengen-ogs.workspace = true
