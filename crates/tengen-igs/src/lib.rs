@@ -106,7 +106,7 @@ pub async fn connect(
         loop {
             while let Some(end) = pending.iter().position(|&b| b == b'\n') {
                 let line: Vec<u8> = pending.drain(..=end).collect();
-                let line = String::from_utf8_lossy(&line);
+                let line = String::from_utf8_lossy(&strip_telnet(&line)).into_owned();
                 let result = t.lock().expect("igs translator").handle(&line);
                 for c in result.commands {
                     let _ = out.send(c);
@@ -147,7 +147,8 @@ async fn sign_in(
     transcript: &mut String,
 ) -> Result<Vec<u8>, AdapterError> {
     let net = |e: std::io::Error| AdapterError::Network(e.to_string());
-    let mut seen = String::new();
+    // Raw bytes since the last thing sent; telnet commands can split across reads.
+    let mut raw: Vec<u8> = Vec::new();
     let mut buf = vec![0u8; 4096];
     let mut stage = Stage::Name;
     loop {
@@ -158,9 +159,9 @@ async fn sign_in(
                 last_words(transcript, &credentials.password)
             )));
         }
-        let text = String::from_utf8_lossy(&buf[..n]);
-        transcript.push_str(&text);
-        seen.push_str(&text);
+        transcript.push_str(&String::from_utf8_lossy(&buf[..n]));
+        raw.extend_from_slice(&buf[..n]);
+        let seen = String::from_utf8_lossy(&strip_telnet(&raw)).into_owned();
         match stage::next(stage, &seen) {
             Step::Wait => {}
             Step::Send(next, what) => {
@@ -173,12 +174,37 @@ async fn sign_in(
                     .await
                     .map_err(net)?;
                 stage = next;
-                seen.clear();
+                raw.clear();
             }
             Step::Done(rest) => return Ok(rest.into_bytes()),
             Step::Fail(e) => return Err(e),
         }
     }
+}
+
+/// Removes telnet commands (`IAC` sequences such as "won't echo", sent around
+/// the password prompt) so they can't hide the text next to them.
+fn strip_telnet(bytes: &[u8]) -> Vec<u8> {
+    const IAC: u8 = 255;
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != IAC {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        match bytes.get(i + 1) {
+            Some(&IAC) => {
+                out.push(IAC); // an escaped 255
+                i += 2;
+            }
+            // WILL, WONT, DO, DONT carry one option byte.
+            Some(251..=254) => i += 3,
+            _ => i += 2,
+        }
+    }
+    out
 }
 
 /// The last couple of lines the server sent, for an error message. Telnet
@@ -268,38 +294,64 @@ mod stage {
 
     /// What to do given everything received since the last thing sent.
     pub(super) fn next(stage: Stage, seen: &str) -> Step {
-        let lower = seen.to_lowercase();
         match stage {
             Stage::Name if seen.contains("Login:") => Step::Send(Stage::Password, Field::Name),
-            Stage::Password if seen.contains("Password:") || seen.contains("1 1") => {
+            Stage::Password if seen.contains("Password:") || has_line(seen, "1 1") => {
                 Step::Send(Stage::Prompt, Field::Password)
             }
-            // An unregistered name is let in as a guest instead of asking for a password.
-            Stage::Password | Stage::Prompt if lower.contains("guest") => {
-                Step::Fail(AdapterError::Protocol(
-                    "Pandanet doesn't know that account name. Register at pandanet-igs.com first."
-                        .into(),
-                ))
-            }
-            Stage::Prompt
-                if lower.contains("invalid password")
-                    || lower.contains("sorry")
-                    || seen.contains("Login:") =>
-            {
-                Step::Fail(AdapterError::BadCredentials)
-            }
+            Stage::Password if unknown_name(seen) => Step::Fail(not_registered()),
             Stage::Prompt => {
-                // Signed in once the command prompt (`#>`, or `1 5` in client mode) shows.
-                for marker in ["#> ", "#>", "\n1 5", "\n1 6"] {
-                    if let Some(i) = seen.find(marker) {
-                        let after = &seen[i + marker.len()..];
-                        return Step::Done(after.to_string());
-                    }
+                // The prompt means we're in, whatever the welcome text said before it.
+                if let Some(rest) = after_prompt(seen) {
+                    return Step::Done(rest);
+                }
+                if unknown_name(seen) {
+                    return Step::Fail(not_registered());
+                }
+                let lower = seen.to_lowercase();
+                if lower.contains("invalid password")
+                    || lower.contains("incorrect password")
+                    || seen.contains("Login:")
+                {
+                    return Step::Fail(AdapterError::BadCredentials);
                 }
                 Step::Wait
             }
             _ => Step::Wait,
         }
+    }
+
+    /// The text after the command prompt: `#>`, or in client mode (which an
+    /// account can keep switched on) a line like `1 5`.
+    fn after_prompt(seen: &str) -> Option<String> {
+        if let Some(i) = seen.find("#>") {
+            return Some(seen[i + 2..].trim_start_matches(' ').to_string());
+        }
+        let mut at = 0;
+        for line in seen.split_inclusive('\n') {
+            at += line.len();
+            let t = line.trim();
+            if t.len() == 3 && t.starts_with("1 ") && matches!(t.as_bytes()[2], b'5'..=b'8') {
+                return Some(seen[at..].to_string());
+            }
+        }
+        None
+    }
+
+    fn has_line(seen: &str, wanted: &str) -> bool {
+        seen.lines().any(|l| l.trim() == wanted)
+    }
+
+    /// An unregistered name is let in as a guest instead of asked for a password.
+    fn unknown_name(seen: &str) -> bool {
+        let lower = seen.to_lowercase();
+        lower.contains("guest account") || lower.contains("as a guest")
+    }
+
+    fn not_registered() -> AdapterError {
+        AdapterError::Protocol(
+            "Pandanet doesn't know that account name. Register at pandanet-igs.com first.".into(),
+        )
     }
 }
 
@@ -382,6 +434,38 @@ mod tests {
             stage::next(Stage::Prompt, "Last login"),
             Step::Wait
         ));
+    }
+
+    #[test]
+    fn the_client_mode_prompt_counts_even_after_telnet_bytes() {
+        // What Pandanet actually sent after the password (account with client mode on).
+        let mut raw = b"9 File\r\n39 IGS entry on 11 - 05 - 2026\r\n".to_vec();
+        raw.extend_from_slice(&[255, 252, 1]);
+        raw.extend_from_slice(b"1 5\r\n9 hello\r\n");
+        let seen = String::from_utf8_lossy(&strip_telnet(&raw)).into_owned();
+        assert!(
+            matches!(stage::next(Stage::Prompt, &seen), Step::Done(rest) if rest == "9 hello\r\n")
+        );
+        // A prompt at the very start, with nothing before it.
+        assert!(matches!(stage::next(Stage::Prompt, "1 5\n"), Step::Done(rest) if rest.is_empty()));
+        // `1 1` is the password prompt, not "signed in".
+        assert!(matches!(stage::next(Stage::Prompt, "1 1\n"), Step::Wait));
+        // Welcome text that happens to say "sorry" or "guest" isn't a failure.
+        assert!(matches!(
+            stage::next(
+                Stage::Prompt,
+                "Sorry for the downtime! Guests welcome.\r\n1 5\r\n"
+            ),
+            Step::Done(_)
+        ));
+    }
+
+    #[test]
+    fn telnet_commands_are_removed() {
+        assert_eq!(
+            strip_telnet(&[b'a', 255, 251, 1, b'b', 255, 255, b'c']),
+            vec![b'a', b'b', 255, b'c']
+        );
     }
 
     #[test]
