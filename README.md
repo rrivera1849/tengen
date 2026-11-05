@@ -159,6 +159,10 @@ TENGEN_KATAGO=… TENGEN_KATAGO_MODEL=… TENGEN_KATAGO_HUMAN_MODEL=… cargo te
 
 The last two run against a real KataGo: analysis, estimates and reviews, then judging tried moves and playing as a person.
 
+### Releasing
+
+Set the new version in `package.json`, `Cargo.toml` and `src-tauri/tauri.conf.json`, add notes in `docs/releases/v<version>.md`, and push to main. The **Release** workflow notices the unreleased version, runs the tests, builds the app, tags `v<version>` and publishes the release with the `.dmg` attached.
+
 ### How it's built
 
 ```
