@@ -249,8 +249,8 @@ const pv = {
   cursor: PREVIEW_MOVES.length,
   bot: null as BotView | null,
   result: null as string | null,
-  black: "Rafael",
-  white: "Opponent",
+  black: "Sora",
+  white: "Mina",
   blackRank: "3d" as string | null,
   whiteRank: "2k" as string | null,
   server: "OGS" as string | null,
@@ -325,8 +325,8 @@ function previewMove(m: [number, number] | null) {
 function previewLibrary(): LibraryEntry[] {
   return [
     { file: "2026-11-04 21.30 KataGo You vs KataGo (5k).sgf", date: "2026-11-04", black: "You", white: "KataGo", blackRank: null, whiteRank: "5k", result: "B+3.5", server: "KataGo", size: 9, moves: 64, reviewed: false },
-    { file: "2026-11-03 20.12 OGS Rafael (3d) vs Kenji (2k).sgf", date: "2026-11-03", black: "Rafael", white: "Kenji", blackRank: "3d", whiteRank: "2k", result: "W+R", server: "OGS", size: 19, moves: 187, reviewed: true },
-    { file: "2026-11-01 18.40 Pandanet Mika (1k) vs Rafael (2d).sgf", date: "2026-11-01", black: "Mika", white: "Rafael", blackRank: "1k", whiteRank: "2d", result: "B+12.5", server: "Pandanet", size: 19, moves: 241, reviewed: false },
+    { file: "2026-11-03 20.12 OGS Sora (3d) vs Kenji (2k).sgf", date: "2026-11-03", black: "Sora", white: "Kenji", blackRank: "3d", whiteRank: "2k", result: "W+R", server: "OGS", size: 19, moves: 187, reviewed: true },
+    { file: "2026-11-01 18.40 Pandanet Mika (1k) vs Sora (2d).sgf", date: "2026-11-01", black: "Mika", white: "Sora", blackRank: "1k", whiteRank: "2d", result: "B+12.5", server: "Pandanet", size: 19, moves: 241, reviewed: false },
   ];
 }
 
