@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 use crate::{keychain, live, notify, push_view, AppState};
 
 /// The servers that sign in with a name and password.
-pub const PASSWORD_SERVERS: [Server; 2] = [Server::Kgs, Server::Igs];
+pub const PASSWORD_SERVERS: [Server; 3] = [Server::Kgs, Server::Igs, Server::Fox];
 
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
@@ -101,7 +101,12 @@ pub fn push_status(app: &AppHandle) {
 pub fn live_view(state: &AppState) -> Option<live::LiveView> {
     let sessions = state.sessions.lock().expect("sessions lock");
     let server = sessions.active?;
-    let g = sessions.map.get(&server)?.game.as_ref()?;
+    let session = sessions.map.get(&server)?;
+    let g = session.game.as_ref()?;
+    let marks = session
+        .client
+        .as_ref()
+        .is_none_or(|c| c.marks_dead_stones());
     Some(live::LiveView::new(
         g.id,
         g.my_color,
@@ -111,7 +116,7 @@ pub fn live_view(state: &AppState) -> Option<live::LiveView> {
             Phase::Finished => "finished",
         },
         g.dead.iter().map(|p| (p.x, p.y)).collect(),
-        g.phase == Phase::Scoring,
+        g.phase == Phase::Scoring && marks,
     ))
 }
 
@@ -248,6 +253,7 @@ async fn connect_now(
         Server::Igs => Arc::new(
             tengen_igs::connect(tengen_igs::HOST, tengen_igs::PORT, credentials, tx).await?,
         ),
+        Server::Fox => Arc::new(tengen_fox::connect(credentials, tx).await?),
         _ => return Err(AdapterError::Unsupported),
     };
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
@@ -419,7 +425,11 @@ fn handle(app: &AppHandle, server: Server, event: LiveEvent) {
             }
             push_view(app);
             push_status(app);
-            if phase == Phase::Scoring && is_on_board(&state, server, game_id) {
+            let marks = with_session(app, server, |s| {
+                s.client.as_ref().is_none_or(|c| c.marks_dead_stones())
+            })
+            .unwrap_or(true);
+            if phase == Phase::Scoring && marks && is_on_board(&state, server, game_id) {
                 notify(
                     app,
                     "Both passed. Click dead stones to mark them, then accept the score",
@@ -595,6 +605,9 @@ pub fn click(state: &AppState, point: Point) -> Option<Result<(), String>> {
     let (client, g) = active(state)?;
     match g.phase {
         Phase::Finished => None,
+        Phase::Scoring if !client.marks_dead_stones() => Some(Err(
+            "This server counts the game itself. Use Accept score".into(),
+        )),
         Phase::Scoring => {
             let game = state.game.lock().expect("game lock");
             if game.board().get(point).is_none() {

@@ -256,7 +256,7 @@ function meta(rank: string | null, captures: number, ...extra: (string | null)[]
 }
 
 /** What each server is called in the interface. */
-const SERVER_LABEL: Record<ServerName, string> = { OGS: "OGS", KGS: "KGS", IGS: "Pandanet" };
+const SERVER_LABEL: Record<ServerName, string> = { OGS: "OGS", KGS: "KGS", IGS: "Pandanet", Fox: "Fox" };
 
 function showServers(list: ServerStatus[]) {
   servers = list;
@@ -361,12 +361,13 @@ const SPEED_HINTS: Record<Speed, string> = {
 };
 
 /** Board sizes each server's automatch offers. */
-const AUTOMATCH_SIZES: Record<ServerName, number[]> = { OGS: [9, 13, 19], KGS: [19], IGS: [19] };
+const AUTOMATCH_SIZES: Record<ServerName, number[]> = { OGS: [9, 13, 19], KGS: [19], IGS: [19], Fox: [9, 13, 19] };
 
 const SIGN_UP: Record<ServerName, string> = {
   OGS: "",
   KGS: "Kept in your Mac's Keychain. No KGS account yet? At gokgs.com, enter as a guest, then choose Register.",
   IGS: "Kept in your Mac's Keychain. No Pandanet account yet? Register at pandanet-igs.com.",
+  Fox: "Your Fox account name and password, kept in your Mac's Keychain. No password? Register at account.foxwq.com/reg/foreign.html. Fox doesn't allow unofficial apps, so it could restrict accounts that use Tengen.",
 };
 
 async function openOnline() {

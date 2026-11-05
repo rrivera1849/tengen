@@ -1,8 +1,16 @@
 [package]
 name = "tengen-fox"
+description = "Fox Go Server (foxwq) adapter for Tengen"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 tengen-core.workspace = true
+md-5 = "0.10"
+flate2 = "1"
+rand = "0.8"
+tokio = { workspace = true, features = ["net", "io-util", "sync", "time", "rt"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }

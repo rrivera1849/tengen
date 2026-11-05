@@ -15,7 +15,11 @@ fn main() {
 
     let id = std::env::var("TENGEN_OGS_CLIENT_ID")
         .ok()
-        .or_else(|| std::fs::read_to_string(&local).ok().and_then(|text| setting(&text, "ogs_client_id")))
+        .or_else(|| {
+            std::fs::read_to_string(&local)
+                .ok()
+                .and_then(|text| setting(&text, "ogs_client_id"))
+        })
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty());
     if let Some(id) = id {

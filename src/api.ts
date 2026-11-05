@@ -6,8 +6,8 @@ import { listen } from "@tauri-apps/api/event";
 
 export type Color = "black" | "white";
 export type Speed = "blitz" | "rapid" | "live";
-/** OGS signs in through the browser; KGS and IGS (Pandanet) with a name and password. */
-export type ServerName = "OGS" | "KGS" | "IGS";
+/** OGS signs in through the browser; KGS, IGS (Pandanet) and Fox with a name and password. */
+export type ServerName = "OGS" | "KGS" | "IGS" | "Fox";
 
 export interface LiveView {
   gameId: number;
@@ -193,7 +193,7 @@ function preview(command: string): unknown {
       server, configured: true, signedIn: on, connected: on, username: on ? "rafael" : null, rank: on ? "12k" : null,
       searching: false, inGame: live && server === "OGS",
     });
-    return [status("OGS", signedIn), status("KGS", params.has("kgs")), status("IGS", false)];
+    return [status("OGS", signedIn), status("KGS", params.has("kgs")), status("IGS", false), status("Fox", params.has("fox"))];
   }
   if (command === "ai_status") return { katago: true, apiKey: true };
   if (command === "review_side") return "black";

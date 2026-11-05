@@ -15,10 +15,11 @@ Early, but playable. What works today:
 - Load any OGS game by number or link, for review or to download its SGF
 - Sign in to OGS and play live: automatch on 9×9, 13×13 or 19×19 at blitz, rapid or live pace, with clocks, pass, resign and accepting the score
 - Sign in to KGS or Pandanet (IGS) with your name and password and play live the same way: 19×19 automatch, clocks (including Canadian overtime), and clicking dead stones while scoring
+- Sign in to Fox and play live: automatch on 9×9, 13×13 or 19×19, clocks, and Fox's own counting at the end
 - A score estimate on one key (E), from KataGo running on your Mac: the score, who owns what, and dead stones
 - An AI review (R) of any finished game: a score graph, up to five of your mistakes and three of your opponent's, each with KataGo's better line, a plain-language lesson from Claude, and a maxim to carry into your next game. Saved SGFs keep the lessons as comments
 
-KGS and Pandanet are new and haven't been tried against the real servers yet; expect a fix or two after the first games. Next up: Fox.
+KGS, Pandanet and Fox are new and haven't been through full games on the real servers yet; expect a fix or two after the first games.
 
 ## Run it on your Mac
 
@@ -104,7 +105,7 @@ crates/tengen-ogs/    Online-Go.com adapter: REST, sign-in (auth.rs) and live pl
 crates/tengen-kgs/    KGS adapter: the JSON API over HTTP long polling
 crates/tengen-igs/    Pandanet adapter: the IGS text protocol over TCP
 crates/tengen-ai/     KataGo engine bridge, score estimate, lesson finder, Claude client and maxims
-crates/tengen-fox/    Fox adapter (protocol research not started)
+crates/tengen-fox/    Fox adapter: Fox's binary protocol over TCP (see PROTOCOL.md)
 ```
 
 Every server plugs into the interfaces in `tengen-core` (`ServerAdapter` for records, `LiveClient` and `LiveEvent` for live play), so the interface never knows which server a game came from. Each adapter keeps its protocol in a `protocol.rs` with no networking, tested line by line. Logins stay on your Mac, and connections go straight from your Mac to each server.
@@ -119,7 +120,11 @@ TENGEN_KATAGO=… TENGEN_KATAGO_MODEL=… cargo test -p tengen-ai --test real_ka
 
 ## Fox
 
-Fox has no public API, so its adapter will be built by studying the official client's traffic. That goes against Fox's terms of service, and accounts used with an unofficial client could be banned. Tengen will behave like the official client and never automate play.
+Choose **Play online** (⌘L), pick **Fox**, and sign in with your Fox account name and password. Fox's apps let you sign in by phone, WeChat or Google without ever setting a password; if that's your case, make an account with a password at Fox's [overseas sign-up page](https://account.foxwq.com/reg/foreign.html), which only needs an email.
+
+Fox ends games by counting, not by marking dead stones. When both players pass, Tengen asks Fox to count; once your opponent agrees, Fox's AI judges the board, Tengen shows the stones it considers dead, and **Accept score** confirms. If your opponent asks to count, **Accept score** agrees.
+
+Fox has no public API. Tengen speaks its protocol as written down in [`crates/tengen-fox/PROTOCOL.md`](crates/tengen-fox/PROTOCOL.md), learned from [foxwq-web](https://github.com/foxwq-web/foxwq-web.github.io), an open browser client for Fox. Fox doesn't allow unofficial clients, so an account used with Tengen could be restricted. Tengen behaves like a person using the official client and never plays on its own.
 
 ## License
 

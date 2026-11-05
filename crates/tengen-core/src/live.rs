@@ -116,6 +116,11 @@ pub trait LiveClient: Send + Sync {
     fn resign(&self, game_id: u64);
     /// While scoring: marks the group at `point` dead, or alive again.
     fn toggle_dead(&self, game_id: u64, point: Point, dead: bool);
+    /// Whether players mark dead stones themselves while scoring. Fox judges
+    /// them itself, so its client says no.
+    fn marks_dead_stones(&self) -> bool {
+        true
+    }
     /// While scoring: agrees with the stones marked dead.
     fn accept_score(&self, game_id: u64);
     /// Stops following a game.
