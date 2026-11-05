@@ -113,7 +113,7 @@ You need [Rust](https://rustup.rs), [Node.js](https://nodejs.org) 20 or later, a
 ```sh
 npm install
 npm run tauri dev      # opens the app with live reload
-npm run tauri build    # makes Tengen.app and a .dmg in src-tauri/target/release/bundle
+npm run tauri build    # makes Tengen.app and a .dmg in target/release/bundle
 ```
 
 `npm run dev` alone opens the interface in a browser with a sample game, for design work. Add `?live` for a live game with clocks, `?live&offline` to see it reconnecting, `?signedin&searching` for the search with a maxim, or `?update` for the update notice.

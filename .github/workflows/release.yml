@@ -88,7 +88,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
-          dmg=$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -1)
+          # The workspace builds into target/ at the repository root.
+          dmg=$(ls target/release/bundle/dmg/*.dmg src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null | head -1)
+          if [ -z "$dmg" ]; then
+            echo "No .dmg was built" >&2
+            exit 1
+          fi
           name="Tengen-$VERSION-AppleSilicon.dmg"
           cp "$dmg" "$name"
           notes="docs/releases/v$VERSION.md"
