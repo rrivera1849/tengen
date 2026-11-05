@@ -23,6 +23,24 @@ export interface Line {
   color: Color;
 }
 
+/** A mistake to circle on the board: orange for yours, blue for your opponent's. */
+export interface Ring {
+  at: [number, number];
+  color: Color;
+  mine: boolean;
+  points: number;
+  selected: boolean;
+}
+
+/** Review marks: circled mistakes, the try-again target and a hint's glow. */
+export interface Marks {
+  rings?: Ring[];
+  target?: [number, number] | null;
+  hint?: [number, number] | null;
+  /** A move you tried that was right; it stays until the marks change. */
+  found?: [number, number, Color] | null;
+}
+
 export interface Look {
   texture: Texture;
   stones: StoneStyle;
@@ -56,12 +74,21 @@ export class BoardView {
   onPlay: (x: number, y: number) => void = () => {};
   /** While scoring on servers where you mark dead stones yourself: a click on a stone. */
   onMark: ((x: number, y: number) => void) | null = null;
+  /** A click on a circled mistake, by its index in the rings. */
+  onRing: ((index: number) => void) | null = null;
+  private marks: Marks = {};
+  /** Called with the board's side in CSS pixels whenever it's refitted. */
+  onFit: (side: number) => void = () => {};
+  /** Device pixels per grid step, once the board has been fitted. */
+  private step = 0;
 
   constructor(private svg: SVGSVGElement, private look: Look) {
     svg.addEventListener("pointermove", (e) => this.track(e));
     svg.addEventListener("pointerleave", () => this.setHover(null));
     svg.addEventListener("click", (e) => {
       const p = this.pointAt(e);
+      const ring = p ? this.ringAt(p) : -1;
+      if (ring >= 0) return this.onRing?.(ring);
       if (this.marking && p && this.occupied(p)) return this.onMark?.(p[0], p[1]);
       if (this.interactive && p && !this.occupied(p)) this.onPlay(p[0], p[1]);
     });
@@ -69,12 +96,57 @@ export class BoardView {
 
   setLook(look: Look) {
     this.look = look;
+    if (this.fitted) this.fit(this.fitted);
     this.render();
   }
 
   update(view: View) {
+    const resized = this.view?.size !== view.size;
     this.view = view;
+    if (resized && this.fitted) this.fit(this.fitted);
     this.render();
+  }
+
+  private fitted = 0;
+
+  /**
+   * Sizes the board to fit `width` CSS pixels, rounded down so each grid
+   * step is a whole number of device pixels: every line then lands on the
+   * pixel grid and stays sharp. Returns the width used.
+   */
+  fit(width: number) {
+    this.fitted = width;
+    const dpr = window.devicePixelRatio || 1;
+    const span = (this.view?.size ?? 19) - 1 + 2 * this.margin();
+    this.step = Math.max(4, Math.floor((width * dpr) / span));
+    const side = (this.step * span) / dpr;
+    this.svg.style.width = this.svg.style.height = `${side}px`;
+    this.render();
+    this.onFit(side);
+    return side;
+  }
+
+  /** Review marks; null clears them. */
+  setMarks(m: Marks | null) {
+    this.marks = m ?? {};
+    this.render();
+  }
+
+  /** A wrong try: a stone that appears with a cross, then fades. */
+  flashMiss(x: number, y: number, color: Color) {
+    const g = this.stone(x, y, color, "miss");
+    const d = 0.17;
+    g.append(svg("path", { d: `M${x - d} ${y - d}L${x + d} ${y + d}M${x + d} ${y - d}L${x - d} ${y + d}`, class: "miss-cross" }));
+    this.svg.append(g);
+    window.setTimeout(() => g.remove(), 1100);
+  }
+
+  private ringAt([x, y]: [number, number]) {
+    return (this.marks.rings ?? []).findIndex((r) => r.at[0] === x && r.at[1] === y && this.stoneAt(r.at) === r.color);
+  }
+
+  private stoneAt([x, y]: [number, number]): Color | null {
+    return this.view?.stones.find(([a, b]) => a === x && b === y)?.[2] ?? null;
   }
 
   /** One grid step of wood around the lines; more room for coordinates. */
@@ -117,7 +189,9 @@ export class BoardView {
   }
 
   private track(e: PointerEvent) {
-    this.svg.style.cursor = this.marking && this.pointAt(e) && this.occupied(this.pointAt(e)!) ? "pointer" : "";
+    const at = this.pointAt(e);
+    const clickable = at && ((this.marking && this.occupied(at)) || this.ringAt(at) >= 0);
+    this.svg.style.cursor = clickable ? "pointer" : "";
     if (!this.interactive) return this.setHover(null);
     const p = this.pointAt(e);
     this.setHover(p && !this.occupied(p) ? p : null);
@@ -142,11 +216,18 @@ export class BoardView {
     if (this.look.coords) this.svg.append(this.coordinates(n, m));
     const deadList = [...(v.live?.removed ?? []), ...(this.estimate?.dead ?? [])];
     const dead = new Set(deadList.map(([x, y]) => `${x},${y}`));
+    if (this.marks.hint) this.svg.append(this.hintGlow(this.marks.hint));
     for (const [x, y, c] of v.stones) {
       this.svg.append(this.stone(x, y, c, dead.has(`${x},${y}`) ? "stone dead" : "stone"));
     }
     if (this.estimate) this.svg.append(this.territory(this.estimate));
-    if (v.last && !this.line) this.svg.append(this.lastMark(v.last));
+    if (v.last && !this.line && !this.marks.target) this.svg.append(this.lastMark(v.last));
+    if (this.marks.rings) this.svg.append(this.rings(this.marks.rings));
+    if (this.marks.target) this.svg.append(this.target(this.marks.target));
+    if (this.marks.found) {
+      const [x, y, c] = this.marks.found;
+      this.svg.append(this.stone(x, y, c, "stone found"));
+    }
     if (this.line) this.svg.append(this.ghostLine(this.line));
     this.hover = null;
   }
@@ -161,6 +242,37 @@ export class BoardView {
       }));
     }
     return g;
+  }
+
+  /** Circled mistakes, bigger for costlier ones; only on stones still on the board. */
+  private rings(list: Ring[]) {
+    const g = svg("g", { class: "rings" });
+    for (const r of list) {
+      if (this.stoneAt(r.at) !== r.color) continue;
+      const radius = 0.68 + Math.min(r.points, 6) * 0.06;
+      g.append(svg("circle", {
+        cx: String(r.at[0]), cy: String(r.at[1]), r: radius.toFixed(3),
+        class: `ring ${r.mine ? "mine" : "theirs"}${r.selected ? " selected" : ""}`,
+      }));
+    }
+    return g;
+  }
+
+  /** Where you played, in a position you're trying again. */
+  private target([x, y]: [number, number]) {
+    return svg("circle", { class: "target", cx: String(x), cy: String(y), r: "0.52" });
+  }
+
+  /** A soft pool of light over the area where the better move is. */
+  private hintGlow([x, y]: [number, number]) {
+    // Off-center, so the brightest point doesn't give the answer away.
+    const h = hash(x, y);
+    const cx = x + ((h % 7) - 3) * 0.3;
+    const cy = y + (((h >> 3) % 7) - 3) * 0.3;
+    return svg("g", { class: "hint-glow" }, [
+      svg("circle", { cx: cx.toFixed(2), cy: cy.toFixed(2), r: "2.8", fill: "url(#hint)" }),
+      svg("circle", { cx: cx.toFixed(2), cy: cy.toFixed(2), r: "2.8", class: "hint-edge" }),
+    ]);
   }
 
   /** The move played (a ring) and the better line, numbered from 1. */
@@ -191,30 +303,61 @@ export class BoardView {
   }
 
   private defs() {
+    const shadow = (dx: number, dy: number, blur: number, alpha: number, name: string) => [
+      svg("feGaussianBlur", { in: "SourceAlpha", stdDeviation: String(blur) }),
+      svg("feOffset", { dx: String(dx), dy: String(dy), result: `${name}-o` }),
+      svg("feFlood", { "flood-color": "#190c00", "flood-opacity": String(alpha) }),
+      svg("feComposite", { in2: `${name}-o`, operator: "in", result: name }),
+    ];
     return svg("defs", {}, [
-      svg("radialGradient", { id: "slate", cx: "0.34", cy: "0.28", r: "0.78" }, [
-        svg("stop", { offset: "0", "stop-color": "#8a8f8d" }),
-        svg("stop", { offset: "0.22", "stop-color": "#3a3d3c" }),
-        svg("stop", { offset: "0.55", "stop-color": "#151717" }),
-        svg("stop", { offset: "1", "stop-color": "#050606" }),
+      svg("radialGradient", { id: "slate", cx: "0.36", cy: "0.3", r: "0.72" }, [
+        svg("stop", { offset: "0", "stop-color": "#5d6261" }),
+        svg("stop", { offset: "0.26", "stop-color": "#2c2f2f" }),
+        svg("stop", { offset: "0.58", "stop-color": "#161818" }),
+        svg("stop", { offset: "1", "stop-color": "#0a0b0b" }),
       ]),
-      svg("radialGradient", { id: "shell", cx: "0.36", cy: "0.28", r: "0.8" }, [
-        svg("stop", { offset: "0", "stop-color": "#ffffff" }),
-        svg("stop", { offset: "0.3", "stop-color": "#f6f3ea" }),
-        svg("stop", { offset: "0.7", "stop-color": "#e2ddd0" }),
-        svg("stop", { offset: "1", "stop-color": "#c4bdac" }),
+      svg("radialGradient", { id: "shell", cx: "0.4", cy: "0.34", r: "0.72" }, [
+        svg("stop", { offset: "0", "stop-color": "#fbf8f1" }),
+        svg("stop", { offset: "0.55", "stop-color": "#efe9dc" }),
+        svg("stop", { offset: "0.88", "stop-color": "#d9d1bf" }),
+        svg("stop", { offset: "1", "stop-color": "#c6bca7" }),
+      ]),
+      // The shell's highlight sits over its grain.
+      svg("radialGradient", { id: "sheen", cx: "0.36", cy: "0.28", r: "0.5" }, [
+        svg("stop", { offset: "0", "stop-color": "#ffffff", "stop-opacity": "0.95" }),
+        svg("stop", { offset: "0.84", "stop-color": "#ffffff", "stop-opacity": "0" }),
+      ]),
+      // Clamshell stones have faint parallel growth lines.
+      svg("pattern", { id: "grain", width: "0.11", height: "1", patternUnits: "userSpaceOnUse" }, [
+        svg("rect", { x: "0.07", y: "0", width: "0.018", height: "1", fill: "#aa9673", "fill-opacity": "0.16" }),
       ]),
       // Light from the upper left: the lamp's warm pool, and a soft darkening at the rim.
       svg("radialGradient", { id: "lamp", cx: "0.42", cy: "0.38", r: "0.7" }, [
-        svg("stop", { offset: "0", "stop-color": "#fff0d2", "stop-opacity": "0.2" }),
-        svg("stop", { offset: "1", "stop-color": "#fff0d2", "stop-opacity": "0" }),
+        svg("stop", { offset: "0", "stop-color": "#fff0d2", "stop-opacity": "0.16" }),
+        svg("stop", { offset: "0.6", "stop-color": "#fff0d2", "stop-opacity": "0" }),
       ]),
       svg("radialGradient", { id: "rim", cx: "0.5", cy: "0.5", r: "0.75" }, [
         svg("stop", { offset: "0.7", "stop-color": "#281400", "stop-opacity": "0" }),
-        svg("stop", { offset: "1", "stop-color": "#281400", "stop-opacity": "0.3" }),
+        svg("stop", { offset: "1", "stop-color": "#281400", "stop-opacity": "0.26" }),
       ]),
+      svg("radialGradient", { id: "hint" }, [
+        svg("stop", { offset: "0", "stop-color": "#fff3d6", "stop-opacity": "0.75" }),
+        svg("stop", { offset: "0.7", "stop-color": "#ffe2a8", "stop-opacity": "0.35" }),
+        svg("stop", { offset: "1", "stop-color": "#ffe2a8", "stop-opacity": "0" }),
+      ]),
+      // Two shadows: a tight one where the stone meets the wood, a soft one under it.
       svg("filter", { id: "drop", x: "-40%", y: "-40%", width: "190%", height: "190%" }, [
-        svg("feDropShadow", { dx: "0.06", dy: "0.12", stdDeviation: "0.07", "flood-color": "#140800", "flood-opacity": "0.5" }),
+        ...shadow(0.03, 0.06, 0.02, 0.35, "near"),
+        ...shadow(0.06, 0.15, 0.1, 0.36, "far"),
+        svg("feMerge", {}, [
+          svg("feMergeNode", { in: "far" }),
+          svg("feMergeNode", { in: "near" }),
+          svg("feMergeNode", { in: "SourceGraphic" }),
+        ]),
+      ]),
+      svg("filter", { id: "ring-glow", x: "-50%", y: "-50%", width: "200%", height: "200%" }, [
+        svg("feGaussianBlur", { in: "SourceGraphic", stdDeviation: "0.12", result: "blur" }),
+        svg("feMerge", {}, [svg("feMergeNode", { in: "blur" }), svg("feMergeNode", { in: "SourceGraphic" })]),
       ]),
     ]);
   }
@@ -232,17 +375,23 @@ export class BoardView {
   }
 
   private grid(n: number) {
-    const g = svg("g", { class: "grid" });
     const line = WOODS[this.look.texture].line;
-    const width = 0.034;
+    // Fitted, a line is one CSS pixel (the border two), on whole device
+    // pixels; an odd width needs a half-pixel shift to land there.
+    const dpr = window.devicePixelRatio || 1;
+    const px = this.step ? Math.max(1, Math.round(dpr)) : 0;
+    const width = px ? px / this.step : 0.034;
+    const edgeWidth = px ? (2 * px) / this.step : width * 1.6;
+    const shift = px && px % 2 ? 0.5 / this.step : 0;
+    const g = svg("g", { class: "grid", transform: `translate(${shift} ${shift})` });
     for (let i = 0; i < n; i++) {
       const edge = i === 0 || i === n - 1;
-      const sw = String(edge ? width * 1.6 : width);
-      g.append(svg("line", { x1: "0", y1: String(i), x2: String(n - 1), y2: String(i), stroke: line, "stroke-width": sw, "stroke-linecap": "square", opacity: "0.74" }));
-      g.append(svg("line", { x1: String(i), y1: "0", x2: String(i), y2: String(n - 1), stroke: line, "stroke-width": sw, "stroke-linecap": "square", opacity: "0.74" }));
+      const sw = String(edge ? edgeWidth : width);
+      g.append(svg("line", { x1: "0", y1: String(i), x2: String(n - 1), y2: String(i), stroke: line, "stroke-width": sw, "stroke-linecap": "square", opacity: "0.78" }));
+      g.append(svg("line", { x1: String(i), y1: "0", x2: String(i), y2: String(n - 1), stroke: line, "stroke-width": sw, "stroke-linecap": "square", opacity: "0.78" }));
     }
     for (const [x, y] of starPoints(n)) {
-      g.append(svg("circle", { cx: String(x), cy: String(y), r: "0.09", fill: line, opacity: "0.9" }));
+      g.append(svg("circle", { cx: String(x), cy: String(y), r: "0.085", fill: line, opacity: "0.92" }));
     }
     return g;
   }
@@ -265,7 +414,11 @@ export class BoardView {
   private stone(x: number, y: number, color: Color, cls = "stone") {
     const g = svg("g", { class: `${cls} ${color}` });
     const flat = this.look.stones === "flat";
-    const attrs: Record<string, string> = { cx: String(x), cy: String(y), r: "0.47" };
+    // Real stones never sit exactly on the point.
+    const placed = cls.startsWith("stone") && !flat;
+    const h = hash(x, y);
+    const [cx, cy] = placed ? nudge(x, y) : [x, y];
+    const attrs: Record<string, string> = { cx: cx.toFixed(3), cy: cy.toFixed(3), r: "0.478" };
     if (flat) {
       Object.assign(attrs, color === "black"
         ? { fill: "#202226" }
@@ -279,13 +432,33 @@ export class BoardView {
     }
     if (cls.startsWith("stone") || cls === "line-stone") attrs.filter = "url(#drop)";
     g.append(svg("circle", attrs));
+    if (!flat && color === "white") {
+      const r = attrs.r;
+      const turn = h % 180;
+      g.append(svg("circle", { cx: attrs.cx, cy: attrs.cy, r, fill: "url(#grain)", transform: `rotate(${turn} ${attrs.cx} ${attrs.cy})`, "pointer-events": "none" }));
+      g.append(svg("circle", { cx: attrs.cx, cy: attrs.cy, r, fill: "url(#sheen)", "pointer-events": "none" }));
+    }
     return g;
   }
 
   /** The last move: a small brass dot. */
   private lastMark([x, y]: [number, number]) {
-    return svg("circle", { class: "last", cx: String(x), cy: String(y), r: "0.17" });
+    const [cx, cy] = this.look.stones === "flat" ? [x, y] : nudge(x, y);
+    return svg("circle", { class: "last", cx: cx.toFixed(3), cy: cy.toFixed(3), r: "0.13" });
   }
+}
+
+/** A stable little number per point, for placement and grain. */
+function hash(x: number, y: number) {
+  let h = (x * 73856093) ^ (y * 19349663);
+  h = Math.imul(h ^ (h >>> 13), 0x5bd1e995);
+  return (h ^ (h >>> 15)) >>> 0;
+}
+
+/** Where a stone actually rests: up to 3% of a grid step off the point. */
+function nudge(x: number, y: number): [number, number] {
+  const h = hash(x, y);
+  return [x + ((h & 15) / 15 - 0.5) * 0.06, y + (((h >> 4) & 15) / 15 - 0.5) * 0.06];
 }
 
 function svg(tag: string, attrs: Record<string, string>, children: Element[] = []) {

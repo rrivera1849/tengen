@@ -8,13 +8,15 @@ import { click } from "./sound";
 
 interface Settings extends Look {
   sound: boolean;
+  /** Only the board and the clocks. */
+  zen: boolean;
   matchSize: number;
   matchSpeed: Speed;
   matchServer: ServerName;
 }
 
 const DEFAULTS: Settings = {
-  texture: "kaya", stones: "shell", coords: false, sound: true, matchSize: 19, matchSpeed: "rapid", matchServer: "OGS",
+  texture: "kaya", stones: "shell", coords: false, sound: true, zen: false, matchSize: 19, matchSpeed: "rapid", matchServer: "OGS",
 };
 
 function loadSettings(): Settings {
@@ -40,6 +42,38 @@ let settings = loadSettings();
 let view: View | null = null;
 let servers: ServerStatus[] = [];
 const board = new BoardView($("#board") as unknown as SVGSVGElement, settings);
+
+// ---------- layout ----------
+
+const stage = $(".stage");
+const column = $(".board-column");
+
+/** Sizes the board to its column, on whole device pixels, and tells the CSS. */
+function fitBoard() {
+  board.fit(column.clientWidth);
+}
+board.onFit = (side) => stage.style.setProperty("--board", `${side}px`);
+
+/**
+ * Players beside the board, or (when that would make the board smaller)
+ * above and below it. The beside layout needs about 640px of width for them.
+ */
+function chooseLayout() {
+  const beside = Math.min(innerHeight - 214, innerWidth - 640);
+  const stacked = Math.min(innerHeight - 290, innerWidth - 80);
+  document.body.classList.toggle("narrow", stacked > beside + 8);
+}
+
+new ResizeObserver(() => fitBoard()).observe(column);
+window.addEventListener("resize", chooseLayout);
+chooseLayout();
+
+function setZen(on: boolean) {
+  settings.zen = on;
+  saveSettings(settings);
+  document.body.classList.toggle("zen", on);
+}
+document.body.classList.toggle("zen", settings.zen);
 
 // ---------- rendering ----------
 
@@ -67,6 +101,9 @@ function show(v: View) {
   }
   panel.setCursor(v.cursor);
   const m = mode(v);
+  // Your side sits nearest you: at the bottom when the players are stacked.
+  document.body.classList.toggle("me-white", v.live?.myColor === "white");
+  document.body.dataset.mode = m;
   board.interactive = m === "review" || (m === "live" && v.toMove === v.live?.myColor);
   board.marking = m === "scoring" && !!v.live?.markDead;
   board.update(v);
@@ -189,7 +226,7 @@ async function startReview() {
   panel.showWorking();
   try {
     const r = await api.startReview(you);
-    panel.showReview(r, view?.cursor ?? 0);
+    panel.showReview(r);
   } catch (e) {
     panel.close();
     notify(explain(e));
@@ -239,13 +276,14 @@ async function showMaxims() {
 }
 
 panel.initPanel({
-  open: (turn, line) => {
+  open: (turn, line) =>
     runView(() => api.goTo(turn)).then(() => {
       lineTurn = turn;
       board.setLine(line);
-    });
-  },
+    }),
   jump: (turn) => runView(() => api.goTo(turn)),
+  marks: (m) => board.setMarks(m),
+  miss: (x, y, color) => board.flashMiss(x, y, color),
   addKey: () => editKey(),
   showMaxims: () => showMaxims(),
 });
@@ -298,7 +336,10 @@ function explain(e: unknown) {
 
 // ---------- actions ----------
 
-board.onPlay = (x, y) => runView(() => api.play(x, y));
+board.onPlay = (x, y) => {
+  if (!panel.tryMove(x, y)) runView(() => api.play(x, y));
+};
+board.onRing = (i) => panel.openLessonAt(i);
 board.onMark = (x, y) => runView(() => api.play(x, y));
 
 const actions: Record<string, () => void> = {
@@ -472,7 +513,7 @@ function syncLookDialog() {
   const pressed: Record<string, (v: string) => boolean> = {
     texture: (v) => v === settings.texture,
     stones: (v) => v === settings.stones,
-    toggles: (v) => (v === "coords" ? settings.coords : settings.sound),
+    toggles: (v) => (v === "coords" ? settings.coords : v === "zen" ? settings.zen : settings.sound),
   };
   document.querySelectorAll<HTMLElement>("#look-dialog [data-setting]").forEach((group) => {
     group.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
@@ -491,8 +532,10 @@ document.querySelectorAll<HTMLElement>("#look-dialog [data-setting]").forEach((g
     if (kind === "stones") settings.stones = b.value as StoneStyle;
     if (kind === "toggles" && b.value === "coords") settings.coords = !settings.coords;
     if (kind === "toggles" && b.value === "sound") settings.sound = !settings.sound;
+    if (kind === "toggles" && b.value === "zen") setZen(!settings.zen);
     saveSettings(settings);
     board.setLook(settings);
+    fitBoard();
     syncLookDialog();
   });
 });
@@ -520,12 +563,18 @@ window.addEventListener("keydown", (e) => {
   if (!cmd && (e.key === "e" || e.key === "E")) return void actions.estimate();
   if (!cmd && (e.key === "r" || e.key === "R")) return void actions.review();
   if (!cmd && (e.key === "p" || e.key === "P")) return void actions.pass();
+  if (!cmd && (e.key === "z" || e.key === "Z")) {
+    setZen(!settings.zen);
+    if (settings.zen) notify("Zen: just the board and the clocks. Z or Esc to leave");
+    return;
+  }
   if (e.key === "Escape") {
     if (lineTurn !== null) {
       lineTurn = null;
       board.setLine(null);
     } else if (estimateOn) setEstimate(false);
-    else if (panel.isOpen()) panel.close();
+    else if (panel.escape()) return;
+    else if (settings.zen) setZen(false);
     return;
   }
   const handler = cmd ? cmdKeys[e.key.toLowerCase()] : keys[e.key];

@@ -18,14 +18,18 @@
 
       <div class="table">
         <section class="player black" aria-label="Black">
-          <div class="name-row">
-            <p class="name" id="black-name">Black</p>
-            <span class="dot" aria-hidden="true"></span>
+          <div class="who">
+            <div class="name-row">
+              <p class="name" id="black-name">Black</p>
+              <span class="dot" aria-hidden="true"></span>
+            </div>
+            <p class="meta" id="black-meta"></p>
+            <p class="turn"><span class="glow" aria-hidden="true"></span><span class="turn-text">To play</span></p>
           </div>
-          <p class="meta" id="black-meta"></p>
-          <p class="clock" id="black-clock"></p>
-          <p class="clock-note" id="black-clock-note"></p>
-          <p class="turn"><span class="glow" aria-hidden="true"></span><span class="turn-text">To play</span></p>
+          <div class="time">
+            <p class="clock" id="black-clock"></p>
+            <p class="periods"><span class="pips" id="black-pips" aria-hidden="true"></span><span class="clock-note" id="black-clock-note"></span></p>
+          </div>
         </section>
 
         <div class="board-column">
@@ -38,17 +42,22 @@
             <svg id="board" role="img" aria-label="Go board"></svg>
             <div class="board-edge" aria-hidden="true"></div>
           </div>
+          <div class="review-graph" id="review-graph"></div>
         </div>
 
         <section class="player white" aria-label="White">
-          <div class="name-row">
-            <span class="dot" aria-hidden="true"></span>
-            <p class="name" id="white-name">White</p>
+          <div class="who">
+            <div class="name-row">
+              <span class="dot" aria-hidden="true"></span>
+              <p class="name" id="white-name">White</p>
+            </div>
+            <p class="meta" id="white-meta"></p>
+            <p class="turn"><span class="glow" aria-hidden="true"></span><span class="turn-text">To play</span></p>
           </div>
-          <p class="meta" id="white-meta"></p>
-          <p class="clock" id="white-clock"></p>
-          <p class="clock-note" id="white-clock-note"></p>
-          <p class="turn"><span class="glow" aria-hidden="true"></span><span class="turn-text">To play</span></p>
+          <div class="time">
+            <p class="clock" id="white-clock"></p>
+            <p class="periods"><span class="pips" id="white-pips" aria-hidden="true"></span><span class="clock-note" id="white-clock-note"></span></p>
+          </div>
         </section>
 
         <aside class="review" id="review" aria-label="Review"></aside>
@@ -256,6 +265,7 @@
         <div class="choices" data-setting="toggles">
           <button value="coords">Coordinates</button>
           <button value="sound">Stone sound</button>
+          <button value="zen">Zen mode (Z)</button>
         </div>
         <button class="quiet" value="close">Done</button>
       </form>

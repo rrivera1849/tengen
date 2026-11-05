@@ -178,13 +178,15 @@ export function onEvents(handlers: {
 }
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (!inApp) return preview(command) as T;
+  if (!inApp) return preview(command, args) as T;
   return invoke<T>(command, args);
 }
 
 // A fixed position so the interface can be designed in a browser with `npm run dev`.
 // Add `?live` to the address to preview a live game with clocks.
-function preview(command: string): unknown {
+let previewCursor: number | null = null;
+
+function preview(command: string, args?: Record<string, unknown>): unknown {
   const params = new URLSearchParams(location.search);
   const live = params.has("live");
   if (command === "server_status") {
@@ -202,13 +204,16 @@ function preview(command: string): unknown {
   if (command === "list_maxims") return [["Direction of play", ["When your opponent builds, choose the biggest area first"]]];
   if (command !== "current" && command !== "go_to") throw new Error("Open the Tengen app to play; this browser view is a preview.");
   const moves: [number, number][] = [[15, 3], [3, 15], [16, 15], [3, 3], [14, 16], [2, 5], [9, 9], [15, 9], [16, 9], [15, 8], [5, 2], [2, 9]];
+  if (command === "go_to") previewCursor = Math.max(0, Math.min(moves.length, Number(args?.n ?? moves.length)));
+  const n = previewCursor ?? moves.length;
+  const shown = moves.slice(0, n);
   return {
     size: 19,
-    stones: moves.map(([x, y], i) => [x, y, i % 2 ? "white" : "black"]),
-    toMove: "black",
-    cursor: moves.length,
+    stones: shown.map(([x, y], i) => [x, y, i % 2 ? "white" : "black"]),
+    toMove: n % 2 ? "white" : "black",
+    cursor: n,
     total: moves.length,
-    last: moves[moves.length - 1],
+    last: shown[n - 1] ?? null,
     lastWasPass: false,
     capturesBlack: 0,
     capturesWhite: 0,
@@ -249,7 +254,7 @@ function previewEstimate(): Estimate {
 }
 
 function previewReview(): Review {
-  const leads = [0, 0.5, 1, -2, -1.5, 3, 2.5, 4, 4.3, 3.8, 5.1, 4.6, 5.0];
+  const leads = [0.5, 0.4, 1, 0.6, 1.2, 1.4, -1.6, -1.8, -1.2, -1.5, -0.4, -2.6, -2.1];
   return {
     fingerprint: "preview",
     you: "black",
@@ -262,14 +267,14 @@ function previewReview(): Review {
     note: null,
     lessons: [
       {
-        side: "you", moveNumber: 4, color: "black", kind: "Tempo", pointsLost: 3.1,
-        played: [3, 3], best: [9, 3], line: [[9, 3], [9, 15], [13, 13]], answerLine: [], yourReply: null,
-        winBefore: 55, winAfter: 47, bestCoord: "K16", playedCoord: "D16", punish: null,
+        side: "you", moveNumber: 7, color: "black", kind: "Tempo", pointsLost: 3.1,
+        played: [9, 9], best: [9, 3], line: [[9, 3], [9, 15], [13, 13]], answerLine: [], yourReply: null,
+        winBefore: 55, winAfter: 47, bestCoord: "K16", playedCoord: "K10", punish: null,
         lesson: {
-          headline: "The top side was bigger than the corner answer",
-          what_happened: "White approached your corner and you answered next to it at D16, a solid but small move.",
-          better_idea: "K16 claims the top side while it is still open and leaves the corner for later.",
-          why: "The corner was already safe, so answering cost you the move with the most value. Points left open on a wide side are worth more than securing a corner that wasn't in danger.",
+          headline: "The center stone could wait; the top side couldn't",
+          what_happened: "Tengen at the center looks big, but nothing there was under attack.",
+          better_idea: "K16 claims the open top side while White's two stones on the left are still thin.",
+          why: "A move in the center only gains value once the sides are settled. Points on a wide open side are worth more now.",
           maxim: "Before answering, ask whether the move needs an answer",
           points: ["D16", "K16"],
         },
@@ -288,6 +293,13 @@ function previewReview(): Review {
           maxim: "Check for a cut before taking a big point",
           points: ["C14", "D13", "K10"],
         },
+        problem: null,
+      },
+      {
+        side: "you", moveNumber: 11, color: "black", kind: "Shape", pointsLost: 1.6,
+        played: [5, 2], best: [4, 3], line: [[4, 3], [2, 2], [5, 4]], answerLine: [], yourReply: null,
+        winBefore: 49, winAfter: 44, bestCoord: "E16", playedCoord: "F17", punish: null,
+        lesson: null,
         problem: null,
       },
     ],

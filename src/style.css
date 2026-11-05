@@ -24,6 +24,16 @@
   --board-shadow: rgba(0, 0, 0, 0.65);
   --capsule-shadow: rgba(0, 0, 0, 0.8);
   --dot-ring: rgba(255, 230, 190, 0.18);
+  /* Time running low, and the review's two sides. */
+  --warm: #f6b26b;
+  --warm-soft: #d9a679;
+  --warm-glow: rgba(240, 140, 60, 0.35);
+  --mine: #f0a35a;
+  --theirs: #8fb3d9;
+  --graph-bg: rgba(255, 232, 190, 0.11);
+  --graph-black: #000;
+  --graph-white: rgba(236, 228, 212, 0.85);
+  --solid-text: #2a1d0e;
 
   --serif: "Fraunces Variable", "Fraunces", Georgia, serif;
   color-scheme: dark;
@@ -53,6 +63,15 @@
     --board-shadow: rgba(70, 45, 15, 0.38);
     --capsule-shadow: rgba(70, 45, 15, 0.35);
     --dot-ring: rgba(60, 40, 15, 0.25);
+    --warm: #b4580f;
+    --warm-soft: #9a5a22;
+    --warm-glow: rgba(200, 110, 30, 0.2);
+    --mine: #c96b16;
+    --theirs: #3b72ad;
+    --graph-bg: rgba(60, 40, 15, 0.06);
+    --graph-black: #1b1712;
+    --graph-white: #fffdf8;
+    --solid-text: #fffaf0;
     color-scheme: light;
   }
 }
@@ -104,7 +123,7 @@ p {
 }
 
 body.reviewing .stage {
-  --b: min(calc(100vh - 250px), calc(100vw - 600px));
+  --b: min(calc(100vh - 370px), calc(100vw - 600px));
 }
 
 /* ---------- header ---------- */
@@ -155,6 +174,15 @@ body.reviewing .stage {
   gap: 6px;
   padding-top: 20px;
   min-width: 0;
+}
+
+.who,
+.time {
+  display: contents;
+}
+
+.player .turn {
+  order: 9;
 }
 
 .player.black {
@@ -214,15 +242,16 @@ body.reviewing .stage {
 
 .clock {
   margin-top: 20px;
-  font-size: 62px;
+  font-size: 64px;
   font-weight: 300;
   line-height: 1;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums lining-nums;
   color: var(--idle);
 }
 
 .clock:empty,
-.clock-note:empty {
+.clock-note:empty,
+.clock:empty + .periods {
   display: none;
 }
 
@@ -231,14 +260,54 @@ body.reviewing .stage {
 }
 
 .clock.low {
-  color: var(--brass-bright);
-  font-weight: 400;
+  color: var(--warm);
+  text-shadow: 0 0 24px var(--warm-glow);
+}
+
+.periods {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.player.black .periods {
+  flex-direction: row-reverse;
+}
+
+.pips {
+  display: flex;
+  gap: 6px;
+}
+
+.player.black .pips {
+  flex-direction: row-reverse;
+}
+
+.pips span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--dot-ring);
+}
+
+.pips span.left {
+  border: 0;
+  background: var(--brass);
+}
+
+.periods.low .pips span.left {
+  background: var(--warm);
 }
 
 .clock-note {
-  margin-top: 4px;
-  font-size: 15px;
+  margin: 0 4px;
+  font-size: 13.5px;
   color: var(--muted);
+}
+
+.periods.low .clock-note {
+  color: var(--warm-soft);
 }
 
 .turn {
@@ -276,10 +345,13 @@ body.reviewing .stage {
 .board-column {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 16px;
+  min-width: 0;
 }
 
 .matchup {
+  width: var(--board, var(--b));
   display: none;
   justify-content: space-between;
   align-items: center;
@@ -301,7 +373,7 @@ body.reviewing .stage {
 
 .board-wrap {
   position: relative;
-  width: var(--b);
+  width: var(--board, var(--b));
 }
 
 .board-shadow {
@@ -326,11 +398,11 @@ body.reviewing .stage {
 
 .board-edge {
   position: relative;
-  height: calc(var(--b) * 0.035);
+  height: calc(var(--board, var(--b)) * 0.032);
   border-radius: 0 0 3px 3px;
   background-color: #7a4f20;
   background-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.45)), url("./assets/edge.jpg");
-  background-size: auto, var(--b) auto;
+  background-size: auto, var(--board, var(--b)) auto;
 }
 
 #board .ghost {
@@ -356,9 +428,69 @@ body.reviewing .stage {
 }
 
 #board .last {
-  fill: #c8963e;
-  stroke: #5a3b12;
-  stroke-width: 0.03;
+  fill: #c9963f;
+  stroke: rgba(255, 236, 200, 0.55);
+  stroke-width: 0.045;
+}
+
+/* Review marks: your mistakes in orange, your opponent's in blue. */
+#board .ring {
+  fill: none;
+  stroke-width: 0.085;
+  pointer-events: none;
+}
+
+#board .ring.mine {
+  stroke: #ea8a35;
+}
+
+#board .ring.theirs {
+  stroke: #7fb0e6;
+}
+
+#board .ring.selected {
+  stroke-width: 0.095;
+  filter: url(#ring-glow);
+}
+
+#board .target {
+  fill: rgba(240, 150, 70, 0.22);
+  stroke: #e8893a;
+  stroke-width: 0.09;
+  filter: url(#ring-glow);
+}
+
+#board .miss {
+  opacity: 0.55;
+  animation: miss 1.1s ease-in forwards;
+  pointer-events: none;
+}
+
+#board .miss-cross {
+  stroke: #c0392b;
+  stroke-width: 0.07;
+  stroke-linecap: round;
+}
+
+@keyframes miss {
+  60% {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+#board .hint-glow {
+  pointer-events: none;
+}
+
+#board .hint-edge {
+  fill: none;
+  stroke: #e8893a;
+  stroke-opacity: 0.55;
+  stroke-width: 0.05;
+  stroke-dasharray: 0.18 0.14;
 }
 
 #board .coords text {
@@ -494,6 +626,12 @@ button {
   gap: 6px;
 }
 
+body[data-mode="live"] #scrub,
+body[data-mode="scoring"] #scrub,
+body.reviewing #scrub {
+  display: none;
+}
+
 .scrub input {
   width: 140px;
   -webkit-appearance: none;
@@ -617,7 +755,7 @@ body.reviewing .review {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  max-height: calc(var(--b) + 64px);
+  max-height: calc(var(--b) + 150px);
   overflow-y: auto;
   padding: 26px 28px 20px;
   border-radius: 16px;
@@ -679,10 +817,6 @@ body.reviewing .review {
   color: var(--brass-bright);
 }
 
-.lesson-body .maxim blockquote {
-  font-size: 18px;
-}
-
 .progress-text {
   color: var(--soft);
 }
@@ -702,133 +836,248 @@ body.reviewing .review {
   transition: width 300ms ease;
 }
 
-.graph svg {
+/* ---------- the lead graph, under the board ---------- */
+
+.review-graph {
+  display: none;
+  width: var(--board, var(--b));
+}
+
+body.reviewing .review-graph:not(:empty) {
+  display: block;
+}
+
+.review-graph svg {
   display: block;
   width: 100%;
   height: auto;
-  cursor: pointer;
+  overflow: visible;
+  cursor: ew-resize;
+  touch-action: none;
 }
 
-.graph .zero {
+.review-graph .bg {
+  fill: var(--graph-bg);
+}
+
+.review-graph .area.black {
+  fill: var(--graph-black);
+}
+
+.review-graph .area.white {
+  fill: var(--graph-white);
+}
+
+.review-graph .zero {
   stroke: var(--rule);
   stroke-width: 1;
 }
 
-.graph .lead {
+.review-graph .lead {
   fill: none;
-  stroke: var(--text);
-  stroke-width: 1.6;
+  stroke: var(--brass);
+  stroke-width: 1.5;
   stroke-linejoin: round;
 }
 
-.graph .mark.you {
-  fill: var(--brass-bright);
-}
-
-.graph .mark.opponent {
-  fill: var(--room);
+.review-graph .cursor {
   stroke: var(--brass-bright);
-  stroke-width: 1.6;
+  stroke-width: 1.5;
 }
 
-.graph .cursor {
-  stroke: var(--muted);
-  stroke-width: 1;
-  stroke-dasharray: 2 3;
+.review-graph .mark.you {
+  fill: var(--mine);
+  stroke: var(--mine);
+  stroke-width: 2;
+}
+
+.review-graph .mark.opponent {
+  fill: var(--room);
+  stroke: var(--theirs);
+  stroke-width: 2;
 }
 
 .graph-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   margin-top: 6px;
   font-size: 12.5px;
-  color: var(--muted);
-}
-
-.key-note {
-  display: grid;
-  gap: 10px;
-  justify-items: start;
-  padding: 14px 16px;
-  border-radius: 10px;
-  border: 1px solid var(--rule);
-}
-
-.key-note button,
-.review-head button,
-.maxims-link {
-  min-height: 40px;
-  padding: 0 12px;
-  border-radius: 8px;
-  color: var(--brass-bright);
-}
-
-.review-head button {
-  color: var(--muted);
-}
-
-.key-note button:hover,
-.review-head button:hover,
-.maxims-link:hover {
-  background: var(--hover);
-}
-
-.maxims-link {
-  align-self: flex-start;
-  margin-left: -12px;
-}
-
-.lesson {
-  border-top: 1px solid var(--rule);
-}
-
-.lesson:last-of-type {
-  border-bottom: 1px solid var(--rule);
-}
-
-.lesson-top {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 12px;
-  width: 100%;
-  text-align: left;
-  padding: 14px 2px;
-}
-
-.lesson-top:hover {
-  background: color-mix(in srgb, var(--hover) 60%, transparent);
-}
-
-.lesson-meta,
-.lesson-loss {
-  font-size: 13px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
-.lesson-headline {
-  grid-column: 1 / -1;
-  font-size: 17px;
+/* ---------- trying a position again ---------- */
+
+.try {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--mine) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mine) 30%, transparent);
+}
+
+.try.found {
+  background: color-mix(in srgb, var(--brass) 10%, transparent);
+  border-color: color-mix(in srgb, var(--brass) 40%, transparent);
+}
+
+.try-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--warm-soft);
+}
+
+.try-meta .num,
+.moment-points {
+  font-variant-numeric: tabular-nums;
+}
+
+.try-title {
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--name);
+}
+
+.try-text {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--soft);
+}
+
+.try-result {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--brass-bright);
+}
+
+.try-headline,
+.moment-headline {
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--brass-bright);
+}
+
+.try-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.try-buttons button {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 15px;
+}
+
+.try-buttons .solid {
+  background: var(--brass-bright);
+  color: var(--solid-text);
+}
+
+.try-buttons .solid:hover:not(:disabled) {
+  background: var(--brass);
+}
+
+.try-buttons .outline {
+  border: 1px solid var(--rule);
+  color: var(--text);
+}
+
+.try-buttons .outline:hover {
+  background: var(--hover);
+}
+
+.moment-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.moment-card.opponent .try-meta {
+  color: var(--theirs);
+}
+
+.moment-card .maxim blockquote {
+  font-size: 18px;
+}
+
+/* ---------- moments: every mistake in game order ---------- */
+
+.moments {
+  display: flex;
+  flex-direction: column;
+}
+
+.moment {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  width: 100%;
+  padding: 12px 2px;
+  border-top: 1px solid var(--rule);
+  text-align: left;
+}
+
+.moment:last-child {
+  border-bottom: 1px solid var(--rule);
+}
+
+.moment:hover,
+.moment[aria-current="true"] {
+  background: color-mix(in srgb, var(--hover) 70%, transparent);
+}
+
+.moment-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.moment.you .moment-dot {
+  background: var(--mine);
+}
+
+.moment.opponent .moment-dot {
+  border: 2px solid var(--theirs);
+}
+
+.moment-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.moment-meta {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.moment-title {
+  font-size: 16px;
   font-weight: 500;
   line-height: 1.3;
   color: var(--text);
 }
 
-.lesson.open .lesson-headline {
-  font-size: 19px;
+.moment[aria-current="true"] .moment-title {
   color: var(--brass-bright);
 }
 
-.lesson-body {
-  display: grid;
-  gap: 10px;
-  padding: 0 2px 16px;
-  font-size: 15px;
-  line-height: 1.5;
-}
-
-.part-title {
-  font-size: 12.5px;
+.moment-points {
+  font-size: 13px;
   color: var(--muted);
-  margin-bottom: 2px;
 }
 
 .punish {
@@ -984,25 +1233,115 @@ button:disabled {
   display: none !important;
 }
 
-/* ---------- smaller windows: players move above the board ---------- */
+/* ---------- smaller windows: players above and below the board ---------- */
 
-@media (max-width: 1100px) {
-  .stage {
-    --b: min(calc(100vh - 300px), calc(100vw - 80px));
-  }
+body.narrow:not(.reviewing) .stage {
+  --b: min(calc(100vh - 290px), calc(100vw - 80px));
+  gap: 12px;
+  padding-top: 26px;
+}
 
-  .table {
-    grid-template-columns: var(--b);
-    justify-content: center;
-    gap: 16px;
-  }
+body.narrow:not(.reviewing) .table {
+  grid-template-columns: var(--b);
+  justify-content: center;
+  gap: 10px;
+}
 
-  .player {
-    display: none;
-  }
+/* Your opponent on top, you at the bottom (Black at the bottom when watching). */
+body.narrow .player.white,
+body.narrow.me-white .player.black {
+  order: -1;
+}
 
-  .matchup {
-    display: flex;
+body.narrow .player.black,
+body.narrow.me-white .player.white {
+  order: 1;
+}
+
+body.narrow .player {
+  justify-self: center;
+  width: var(--board, var(--b));
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+  text-align: left;
+}
+
+body.narrow .who,
+body.narrow .time {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+body.narrow .time {
+  flex-direction: row-reverse;
+}
+
+body.narrow .player .name-row {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  gap: 10px;
+  align-self: center;
+}
+
+body.narrow .player.white .name-row {
+  flex-direction: row;
+}
+
+body.narrow .name {
+  font-size: 20px;
+}
+
+body.narrow .dot {
+  width: 15px;
+  height: 15px;
+}
+
+body.narrow .meta {
+  font-size: 13px;
+  white-space: nowrap;
+  min-height: 0;
+}
+
+body.narrow .player .turn {
+  order: 0;
+  margin: 0;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+body.narrow .clock {
+  margin: 0;
+  font-size: 30px;
+}
+
+body.narrow .periods,
+body.narrow .player.black .periods {
+  margin: 0;
+  flex-direction: row;
+}
+
+body.narrow .player.black .pips {
+  flex-direction: row;
+}
+
+body.narrow .clock-note {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+body.narrow .board-column {
+  gap: 10px;
+}
+
+/* Reviewing stays side by side down to a narrow window. */
+@media (max-width: 900px) {
+  body.reviewing .stage {
+    --b: min(calc(100vh - 370px), calc(100vw - 80px));
   }
 
   body.reviewing .table {
@@ -1010,13 +1349,79 @@ button:disabled {
   }
 }
 
+/* ---------- zen: only the board and the clocks ---------- */
+
+body.zen:not(.reviewing) .top {
+  visibility: hidden;
+}
+
+body.zen:not(.reviewing) .stage {
+  --b: min(calc(100vh - 120px), calc(100vw - 420px));
+  grid-template-rows: 0 1fr 0;
+  padding: 40px 40px 24px;
+}
+
+body.zen.narrow:not(.reviewing) .stage {
+  --b: min(calc(100vh - 170px), calc(100vw - 80px));
+}
+
+body.zen:not(.reviewing) .table {
+  align-items: stretch;
+}
+
+body.zen:not(.reviewing) :is(.name, .meta, .turn, .clock-note, .matchup) {
+  display: none;
+}
+
+body.zen:not(.reviewing) .player {
+  padding: 0;
+  gap: 8px;
+}
+
+body.zen:not(.reviewing):not(.narrow) .player.black {
+  justify-content: flex-end;
+  padding-bottom: 12%;
+}
+
+body.zen:not(.reviewing):not(.narrow) .player.white {
+  justify-content: flex-start;
+  padding-top: 12%;
+}
+
+body.zen:not(.reviewing) .clock {
+  margin: 0;
+  font-size: 40px;
+}
+
+body.zen.narrow:not(.reviewing) .clock {
+  font-size: 26px;
+}
+
+body.zen:not(.reviewing) .dot {
+  width: 16px;
+  height: 16px;
+}
+
+/* The controls wait out of sight at the bottom until you reach for them. */
+body.zen:not(.reviewing) .bar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translate(-50%, 8px);
+  opacity: 0;
+  transition: opacity 200ms ease, transform 200ms ease;
+  z-index: 5;
+}
+
+body.zen:not(.reviewing) .bar:hover,
+body.zen:not(.reviewing) .bar:focus-within {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none !important;
     transition: none !important;
   }
-}
-
-.lesson.open .lesson-top:hover {
-  background: none;
 }

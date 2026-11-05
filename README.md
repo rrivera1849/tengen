@@ -75,6 +75,8 @@ TENGEN_KATAGO=/opt/homebrew/bin/katago TENGEN_KATAGO_MODEL=~/Downloads/kata1-b18
 
 **Claude.** Written lessons need a Claude API key from [console.anthropic.com](https://console.anthropic.com). Add it from the review panel; it's stored in the macOS Keychain. Without a key the review still shows the score graph and KataGo's better lines. Only positions and KataGo's facts are sent, never player names.
 
+The review circles your mistakes on the board in orange and your opponent's in blue; click one to read its lesson. **Try again** sets up each position before your mistakes so you can look for the better move yourself, with three tries and a hint, before KataGo's line is shown. The graph under the board shows who led, and dragging along it moves through the game.
+
 Analyses and reviews are cached in Tengen's Application Support folder, so reopening a review is instant. Your maxims collect there too, and a review notices when the same kind of lesson keeps coming back.
 
 ## Keys
@@ -85,7 +87,8 @@ Analyses and reviews are cached in Tengen's Application Support folder, so reope
 | P | Pass |
 | E | Show or hide the score estimate |
 | R | Review the game |
-| Esc | Hide the estimate, a better line, or the review |
+| Z | Zen mode: only the board and the clocks |
+| Esc | Hide the estimate or a better line, leave a try or a lesson, close the review, leave zen mode |
 | ← → | Step back or forward through the game |
 | Home, End | Jump to the start or the end |
 | ⌘Z | Take back the last move |
