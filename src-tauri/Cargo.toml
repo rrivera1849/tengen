@@ -26,5 +26,7 @@ tengen-fox.workspace = true
 tengen-ai.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# The update check asks GitHub for Tengen's releases.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Sign-in tokens live in the macOS Keychain (and Windows Credential Manager later).
 keyring = { version = "3", features = ["apple-native", "windows-native"] }

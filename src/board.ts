@@ -90,7 +90,15 @@ export class BoardView {
       const ring = p ? this.ringAt(p) : -1;
       if (ring >= 0) return this.onRing?.(ring);
       if (this.marking && p && this.occupied(p)) return this.onMark?.(p[0], p[1]);
-      if (this.interactive && p && !this.occupied(p)) this.onPlay(p[0], p[1]);
+      if (!this.interactive || !p || this.occupied(p)) return;
+      if (this.confirm && !samePoint(this.pending, p)) {
+        // First click: show the stone; a second click on it places it.
+        this.pending = p;
+        this.render();
+        return;
+      }
+      this.pending = null;
+      this.onPlay(p[0], p[1]);
     });
   }
 
@@ -102,6 +110,7 @@ export class BoardView {
 
   update(view: View) {
     const resized = this.view?.size !== view.size;
+    if (this.view?.total !== view.total || this.view?.cursor !== view.cursor) this.pending = null;
     this.view = view;
     if (resized && this.fitted) this.fit(this.fitted);
     this.render();
@@ -170,6 +179,17 @@ export class BoardView {
 
   /** False while it's the opponent's turn in a live game, or during scoring. */
   interactive = true;
+  /** Click twice to place: the first click only shows where the stone would go. */
+  confirm = false;
+  private pending: [number, number] | null = null;
+
+  /** Drops a stone shown but not yet placed. True if there was one. */
+  clearPending() {
+    if (!this.pending) return false;
+    this.pending = null;
+    this.render();
+    return true;
+  }
   /** True while scoring, when clicking a stone marks its group dead or alive. */
   marking = false;
 
@@ -229,6 +249,12 @@ export class BoardView {
       this.svg.append(this.stone(x, y, c, "stone found"));
     }
     if (this.line) this.svg.append(this.ghostLine(this.line));
+    if (this.pending && this.interactive && !this.occupied(this.pending)) {
+      const [x, y] = this.pending;
+      const g = this.stone(x, y, v.toMove, "pending");
+      g.append(svg("circle", { cx: String(x), cy: String(y), r: "0.16", class: "pending-dot" }));
+      this.svg.append(g);
+    }
     this.hover = null;
   }
 
@@ -446,6 +472,10 @@ export class BoardView {
     const [cx, cy] = this.look.stones === "flat" ? [x, y] : nudge(x, y);
     return svg("circle", { class: "last", cx: cx.toFixed(3), cy: cy.toFixed(3), r: "0.13" });
   }
+}
+
+function samePoint(a: [number, number] | null, b: [number, number] | null) {
+  return !!a && !!b && a[0] === b[0] && a[1] === b[1];
 }
 
 /** A stable little number per point, for placement and grain. */

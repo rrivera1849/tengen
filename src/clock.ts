@@ -1,10 +1,28 @@
 // Shows each player's time, counting down locally between OGS clock updates.
 
 import type { Clock, Color, PlayerClock } from "./api";
+import { tick } from "./sound";
 
 let clock: Clock | null = null;
 let receivedAt = 0;
 let timer = 0;
+/** Whose clock ticks in its last seconds (yours), or null for silence. */
+let tickFor: Color | null = null;
+let lastTick = -1;
+
+/** The last seconds of a clock: ticks at 10 and below. */
+export const TICK_FROM = 10;
+
+export function setTicking(color: Color | null) {
+  tickFor = color;
+}
+
+/** The whole second to tick on, or null when this moment shouldn't tick. */
+export function tickSecond(secondsLeft: number): number | null {
+  const s = Math.ceil(secondsLeft);
+  return s > 0 && s <= TICK_FROM ? s : null;
+}
+
 /** The most byo-yomi periods seen for each side this game: how many dots to draw. */
 let periodsAtStart: Record<Color, number> = { black: 0, white: 0 };
 
@@ -40,6 +58,11 @@ function render() {
     if (running) spend(c, (performance.now() - receivedAt) / 1000);
     const [time, detail] = describe(c);
     const low = running && remaining(c) < 10;
+    if (running && color === tickFor) {
+      const second = tickSecond(remaining(c));
+      if (second !== null && second !== lastTick) tick();
+      lastTick = second ?? -1;
+    }
     el.textContent = time;
     note.textContent = detail;
     el.className = `clock${running ? " running" : ""}${low ? " low" : ""}`;
@@ -49,7 +72,7 @@ function render() {
 }
 
 /** Same rule as the Rust side: main time first, then byo-yomi periods. */
-function spend(c: PlayerClock, secs: number) {
+export function spend(c: PlayerClock, secs: number) {
   const fromMain = Math.min(secs, c.main);
   c.main -= fromMain;
   secs -= fromMain;
@@ -76,7 +99,7 @@ function spend(c: PlayerClock, secs: number) {
   c.periodLeft = periods === 0 ? 0 : left;
 }
 
-function remaining(c: PlayerClock) {
+export function remaining(c: PlayerClock) {
   return c.main > 0 ? c.main : (c.periodLeft ?? c.periodTime ?? 0);
 }
 
@@ -89,7 +112,7 @@ function drawPips(el: HTMLElement, total: number, left: number, inOvertime: bool
 }
 
 /** The big time, and a note about byo-yomi underneath it. */
-function describe(c: PlayerClock): [string, string] {
+export function describe(c: PlayerClock): [string, string] {
   if (c.canadian) {
     if (c.main > 0) return [mmss(c.main), c.periodTime ? `then ${mmss(c.periodTime)} for each block of stones` : ""];
     const stones = c.periods;
@@ -108,7 +131,7 @@ function describe(c: PlayerClock): [string, string] {
   return [mmss(0), ""];
 }
 
-function mmss(secs: number) {
+export function mmss(secs: number) {
   const s = Math.max(0, Math.ceil(secs));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);

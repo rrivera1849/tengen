@@ -99,7 +99,7 @@ impl Store {
                 None => groups.push((e.kind.clone(), vec![e.maxim.clone()])),
             }
         }
-        groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+        groups.sort_by_key(|g| std::cmp::Reverse(g.1.len()));
         groups
     }
 }

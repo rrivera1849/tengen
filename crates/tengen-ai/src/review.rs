@@ -270,6 +270,7 @@ pub fn episodes(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn classify(
     index: usize,
     total: usize,
@@ -767,6 +768,7 @@ mod tests {
                 order: 0,
             }],
             ownership,
+            human_policy: None,
         }
     }
 
@@ -859,8 +861,8 @@ mod tests {
         }
         let alive = vec![-0.9; 25];
         let mut dead = vec![-0.9; 25];
-        for i in 0..3 {
-            dead[i] = 0.9;
+        for d in dead.iter_mut().take(3) {
+            *d = 0.9;
         }
         let flips = group_flips(
             &b,

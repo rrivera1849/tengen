@@ -16,7 +16,7 @@ use tengen_core::live::{LiveClient, LiveEvent, LiveGame, Phase};
 use tengen_core::{Color, Game, GameInfo, Move, Point};
 use tokio::sync::mpsc;
 
-use crate::{keychain, live, notify, push_view, AppState};
+use crate::{diag, keychain, live, notify, push_view, AppState};
 
 /// The servers that sign in with a name and password.
 pub const PASSWORD_SERVERS: [Server; 3] = [Server::Kgs, Server::Igs, Server::Fox];
@@ -89,6 +89,24 @@ pub fn statuses(state: &AppState) -> Vec<ServerStatus> {
         });
     }
     all
+}
+
+impl ServerStatus {
+    pub fn username(&self) -> Option<String> {
+        self.username.clone()
+    }
+
+    /// One line for diagnostics.
+    pub fn summary(&self) -> String {
+        format!(
+            "{} signed in {}, connected {}, searching {}, in a game {}",
+            label(self.server),
+            self.signed_in,
+            self.connected,
+            self.searching,
+            self.in_game
+        )
+    }
 }
 
 pub fn push_status(app: &AppHandle) {
@@ -247,15 +265,23 @@ async fn connect_now(
     server: Server,
     credentials: &Credentials,
 ) -> Result<(), AdapterError> {
+    diag::note(label(server), "connecting");
     let (tx, rx) = mpsc::unbounded_channel();
-    let client: Arc<dyn LiveClient> = match server {
-        Server::Kgs => Arc::new(tengen_kgs::connect(tengen_kgs::ENDPOINT, credentials, tx).await?),
-        Server::Igs => Arc::new(
-            tengen_igs::connect(tengen_igs::HOST, tengen_igs::PORT, credentials, tx).await?,
-        ),
-        Server::Fox => Arc::new(tengen_fox::connect(credentials, tx).await?),
-        _ => return Err(AdapterError::Unsupported),
+    let client: Result<Arc<dyn LiveClient>, AdapterError> = match server {
+        Server::Kgs => tengen_kgs::connect(tengen_kgs::ENDPOINT, credentials, tx)
+            .await
+            .map(|c| Arc::new(c) as Arc<dyn LiveClient>),
+        Server::Igs => tengen_igs::connect(tengen_igs::HOST, tengen_igs::PORT, credentials, tx)
+            .await
+            .map(|c| Arc::new(c) as Arc<dyn LiveClient>),
+        Server::Fox => tengen_fox::connect(credentials, tx)
+            .await
+            .map(|c| Arc::new(c) as Arc<dyn LiveClient>),
+        _ => Err(AdapterError::Unsupported),
     };
+    let client =
+        client.inspect_err(|e| diag::note(label(server), format!("couldn't connect: {e}")))?;
+    diag::note(label(server), "connected and signed in");
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     {
         let state = app.state::<AppState>();
@@ -307,6 +333,10 @@ fn current_generation(app: &AppHandle, server: Server) -> Option<u64> {
 }
 
 async fn dropped(app: AppHandle, server: Server, generation: u64, reason: String, retry: bool) {
+    diag::note(
+        label(server),
+        format!("connection dropped: {reason} (retry {retry})"),
+    );
     {
         let state = app.state::<AppState>();
         let mut sessions = state.sessions.lock().expect("sessions lock");
@@ -378,6 +408,14 @@ fn handle(app: &AppHandle, server: Server, event: LiveEvent) {
     let state = app.state::<AppState>();
     match event {
         LiveEvent::Ready { account } => {
+            diag::note(
+                label(server),
+                format!(
+                    "ready as {} ({})",
+                    account.username,
+                    account.rank.as_deref().unwrap_or("no rank")
+                ),
+            );
             with_session(app, server, |s| {
                 s.me = Some(account);
                 s.connected = true;
@@ -412,6 +450,7 @@ fn handle(app: &AppHandle, server: Server, event: LiveEvent) {
         }
 
         LiveEvent::Phase { game_id, phase } => {
+            diag::note(label(server), format!("game {game_id} phase {phase:?}"));
             let mut changed = false;
             with_game(app, server, game_id, |g| {
                 changed = g.phase != phase;
@@ -444,6 +483,7 @@ fn handle(app: &AppHandle, server: Server, event: LiveEvent) {
         }
 
         LiveEvent::Ended { game_id, result } => {
+            diag::note(label(server), format!("game {game_id} ended {result}"));
             let mut mine = None;
             if !with_game(app, server, game_id, |g| {
                 g.phase = Phase::Finished;
@@ -453,6 +493,7 @@ fn handle(app: &AppHandle, server: Server, event: LiveEvent) {
             }
             if is_on_board(&state, server, game_id) {
                 state.game.lock().expect("game lock").info.result = Some(result.clone());
+                crate::save_to_library(app);
                 announce(app, &result, mine);
             }
             push_view(app);
@@ -478,6 +519,17 @@ fn is_on_board(state: &AppState, server: Server, game_id: u64) -> bool {
 /// Puts a game from the server on the board, or brings the board up to date.
 fn open_game(app: &AppHandle, server: Server, g: LiveGame) {
     let state = app.state::<AppState>();
+    diag::note(
+        label(server),
+        format!(
+            "game {} {}×{}, {} moves so far",
+            g.id,
+            g.size,
+            g.size,
+            g.moves.len()
+        ),
+    );
+    crate::bot::stop(&state);
     if live::in_game(&state) {
         notify(
             app,
@@ -582,6 +634,10 @@ pub fn find_match(app: &AppHandle, server: Server, size: u8, speed: Speed) -> Re
             .ok_or_else(|| format!("Sign in to {} to play there", label(server)))?
     };
     client.find_match(size, speed)?;
+    diag::note(
+        label(server),
+        format!("looking for a {size}×{size} {speed:?} game"),
+    );
     with_session(app, server, |s| s.searching = true);
     push_status(app);
     Ok(())

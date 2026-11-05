@@ -54,6 +54,12 @@ pub struct Query {
     pub analyze_turns: Vec<usize>,
     pub max_visits: u32,
     pub include_ownership: bool,
+    /// Also report the raw policy (and the human policy, with a human model).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub include_policy: bool,
+    /// Per-query settings, such as `humanSLProfile`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub override_settings: Option<Value>,
 }
 
 impl Query {
@@ -95,7 +101,17 @@ impl Query {
             analyze_turns: turns,
             max_visits,
             include_ownership,
+            include_policy: false,
+            override_settings: None,
         }
+    }
+
+    /// The position after the first `n` moves only, analysed at its last turn.
+    pub fn for_prefix(game: &Game, n: usize, max_visits: u32) -> Query {
+        let mut q = Query::for_game(game, vec![], max_visits, false);
+        q.moves.truncate(n);
+        q.analyze_turns = vec![q.moves.len()];
+        q
     }
 }
 
@@ -125,6 +141,10 @@ pub struct TurnResult {
     /// Row by row from the top left; +1 is Black's, -1 is White's.
     #[serde(default)]
     pub ownership: Option<Vec<f64>>,
+    /// With `include_policy` and a human model: how likely a human of the
+    /// chosen rank is to play each point, row by row, then pass; -1 is illegal.
+    #[serde(default)]
+    pub human_policy: Option<Vec<f64>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -176,13 +196,23 @@ impl Engine {
     /// Starts `katago analysis` and waits until it is ready. The first start
     /// on a Mac can take a few minutes while KataGo prepares its network for
     /// the Neural Engine.
-    pub async fn start(binary: &Path, model: &Path, config: &Path) -> Result<Engine, AiError> {
-        let mut child = Command::new(binary)
+    pub async fn start(
+        binary: &Path,
+        model: &Path,
+        human_model: Option<&Path>,
+        config: &Path,
+    ) -> Result<Engine, AiError> {
+        let mut command = Command::new(binary);
+        command
             .arg("analysis")
             .arg("-config")
             .arg(config)
             .arg("-model")
-            .arg(model)
+            .arg(model);
+        if let Some(human) = human_model {
+            command.arg("-human-model").arg(human);
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

@@ -113,6 +113,7 @@ mod tests {
             },
             move_infos: vec![],
             ownership: Some(vec![0.95, 0.9, 0.2, -0.8]),
+            human_policy: None,
         };
         let e = from_result(&r, &b);
         assert_eq!(e.dead, vec![(0, 0)], "the white stone sits in Black's area");

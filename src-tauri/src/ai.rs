@@ -17,16 +17,19 @@ use crate::{keychain, AppState};
 
 #[derive(Default)]
 pub struct AiState {
-    engine: tokio::sync::Mutex<Option<Arc<Engine>>>,
+    /// The running KataGo, and whether it has the human-style network loaded.
+    engine: tokio::sync::Mutex<Option<(Arc<Engine>, bool)>>,
     /// One review at a time.
     reviewing: tokio::sync::Mutex<()>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct AiStatus {
     katago: bool,
     api_key: bool,
+    /// KataGo's human-style network, for playing against KataGo.
+    human_model: bool,
 }
 
 /// Progress for the interface: `stage` is download, starting, quick, deep or lessons.
@@ -41,7 +44,7 @@ fn progress(app: &AppHandle, stage: &'static str, done: u64, total: u64) {
     let _ = app.emit("ai-progress", Progress { stage, done, total });
 }
 
-fn data_dir(app: &AppHandle, sub: &str) -> PathBuf {
+pub(crate) fn data_dir(app: &AppHandle, sub: &str) -> PathBuf {
     let base = app
         .path()
         .app_data_dir()
@@ -50,10 +53,31 @@ fn data_dir(app: &AppHandle, sub: &str) -> PathBuf {
 }
 
 pub fn status(app: &AppHandle) -> AiStatus {
+    let rt = runtime::locate(&data_dir(app, "katago"));
     AiStatus {
-        katago: runtime::locate(&data_dir(app, "katago")).is_some(),
+        katago: rt.is_some(),
         api_key: keychain::load_claude_key().is_some(),
+        human_model: rt.is_some_and(|r| r.human_model.is_some()),
     }
+}
+
+/// Downloads KataGo's human-style network (about 100 MB), once.
+pub async fn install_human(app: &AppHandle) -> Result<AiStatus, String> {
+    let dir = data_dir(app, "katago");
+    let handle = app.clone();
+    crate::diag::note("KataGo", "downloading the human-style network");
+    runtime::install_human_model(&dir, move |done, total| {
+        progress(&handle, "download", done, total)
+    })
+    .await
+    .map_err(|e| {
+        crate::diag::note(
+            "KataGo",
+            format!("human-style network download failed: {e}"),
+        );
+        e.to_string()
+    })?;
+    Ok(status(app))
 }
 
 pub async fn install(app: &AppHandle) -> Result<AiStatus, String> {
@@ -69,20 +93,45 @@ pub async fn install(app: &AppHandle) -> Result<AiStatus, String> {
 
 /// Starts KataGo the first time it's needed and keeps it running.
 async fn engine(app: &AppHandle) -> Result<Arc<Engine>, String> {
+    start_engine(app, false).await
+}
+
+/// KataGo with its human-style network loaded, restarting it if the network
+/// arrived after KataGo started.
+pub(crate) async fn engine_with_human(app: &AppHandle) -> Result<Arc<Engine>, String> {
+    start_engine(app, true).await
+}
+
+async fn start_engine(app: &AppHandle, need_human: bool) -> Result<Arc<Engine>, String> {
     let ai = app.state::<AiState>();
     let mut slot = ai.engine.lock().await;
-    if let Some(e) = slot.as_ref() {
-        return Ok(e.clone());
+    if let Some((e, human)) = slot.as_ref() {
+        if *human || !need_human {
+            return Ok(e.clone());
+        }
     }
     let rt = runtime::locate(&data_dir(app, "katago"))
         .ok_or_else(|| AiError::NotInstalled.to_string())?;
+    if need_human && rt.human_model.is_none() {
+        return Err("KataGo's human-style network isn't downloaded yet".into());
+    }
     progress(app, "starting", 0, 1);
-    let e = Arc::new(
-        Engine::start(&rt.binary, &rt.model, &rt.config)
-            .await
-            .map_err(|e| e.to_string())?,
+    crate::diag::note(
+        "KataGo",
+        format!(
+            "starting (human-style network: {})",
+            rt.human_model.is_some()
+        ),
     );
-    *slot = Some(e.clone());
+    let e = Arc::new(
+        Engine::start(&rt.binary, &rt.model, rt.human_model.as_deref(), &rt.config)
+            .await
+            .map_err(|e| {
+                crate::diag::note("KataGo", format!("couldn't start: {e}"));
+                e.to_string()
+            })?,
+    );
+    *slot = Some((e.clone(), rt.human_model.is_some()));
     Ok(e)
 }
 
@@ -100,7 +149,12 @@ fn current_game(app: &AppHandle) -> Game {
 }
 
 pub async fn estimate(app: &AppHandle) -> Result<Estimate, String> {
-    let game = current_game(app);
+    estimate_game(app, &current_game(app)).await
+}
+
+/// The estimate for `game` at its cursor.
+pub async fn estimate_game(app: &AppHandle, game: &Game) -> Result<Estimate, String> {
+    let game = game.clone();
     let engine = engine(app).await?;
     match estimate::estimate(&engine, &game).await {
         Ok(e) => Ok(e),
@@ -109,6 +163,37 @@ pub async fn estimate(app: &AppHandle) -> Result<Estimate, String> {
             Err(err.to_string())
         }
     }
+}
+
+/// Scores a move tried in the review's "Try again" at the position after
+/// `turn` moves of the game on the board.
+pub async fn judge(
+    app: &AppHandle,
+    turn: usize,
+    tried: Point,
+    played_loss: f64,
+) -> Result<tengen_ai::judge::Judgement, String> {
+    let game = current_game(app);
+    if turn > game.moves().len() {
+        return Err("That position isn't in this game".into());
+    }
+    let engine = engine(app).await?;
+    tengen_ai::judge::judge(&engine, &game, turn, tried, played_loss)
+        .await
+        .map_err(|e| match e {
+            AiError::Other(m) => m,
+            other => {
+                let h = app.clone();
+                tauri::async_runtime::spawn(async move { reset_engine(&h).await });
+                other.to_string()
+            }
+        })
+}
+
+/// The maxim to keep in mind for the next game: your most recent one.
+pub fn next_maxim(app: &AppHandle) -> Option<String> {
+    let store = maxims::Store::load(&data_dir(app, "maxims.json"));
+    store.recent("", 1).into_iter().next()
 }
 
 // ---------- reviews ----------
@@ -153,6 +238,21 @@ pub struct LessonView {
 /// Which side the player was, when Tengen can tell without asking.
 pub fn guess_you(app: &AppHandle) -> Option<Color> {
     let state = app.state::<AppState>();
+    if let Some(b) = state.bot.lock().expect("bot lock").as_ref() {
+        return Some(b.you);
+    }
+    {
+        // A game against KataGo, reopened from the library: you're "You".
+        let game = state.game.lock().expect("game lock");
+        if game.info.server.as_deref() == Some("KataGo") {
+            let you = |n: &Option<String>| n.as_deref() == Some("You");
+            match (you(&game.info.black), you(&game.info.white)) {
+                (true, false) => return Some(Color::Black),
+                (false, true) => return Some(Color::White),
+                _ => {}
+            }
+        }
+    }
     let mut names = crate::sessions::usernames(&state);
     {
         let live = state.live.lock().expect("live lock");

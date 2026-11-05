@@ -15,7 +15,7 @@ use tengen_ogs::auth::{self, Pkce};
 use tengen_ogs::realtime::{decode_points, GameData, OgsEvent, Realtime};
 use tokio::sync::mpsc;
 
-use crate::{keychain, notify, push_view, AppState};
+use crate::{diag, keychain, notify, push_view, AppState};
 
 /// Bumped on every new connection, so events from an old one are ignored.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -218,6 +218,7 @@ fn connect(app: &AppHandle) -> Pin<Box<dyn Future<Output = Result<(), String>> +
 }
 
 async fn connect_now(app: &AppHandle) -> Result<(), String> {
+    diag::note("OGS", "connecting");
     let state = app.state::<AppState>();
     let ogs = state.ogs();
     let (me, jwt) = ogs.live_credentials().await.map_err(|e| match e {
@@ -229,7 +230,11 @@ async fn connect_now(app: &AppHandle) -> Result<(), String> {
     let (tx, rx) = mpsc::unbounded_channel();
     let rt = Realtime::connect(ogs.base_url(), &jwt, tx)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            diag::note("OGS", format!("couldn't connect: {e}"));
+            e.to_string()
+        })?;
+    diag::note("OGS", format!("connected as {}", me.username));
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     {
         let mut live = state.live.lock().expect("live lock");
@@ -265,6 +270,7 @@ async fn listen(app: AppHandle, mut rx: mpsc::UnboundedReceiver<OgsEvent>, gener
 }
 
 async fn reconnect(app: AppHandle, generation: u64, reason: String) {
+    diag::note("OGS", format!("connection dropped: {reason}"));
     {
         let state = app.state::<AppState>();
         let mut live = state.live.lock().expect("live lock");
@@ -301,6 +307,7 @@ fn handle(app: &AppHandle, event: OgsEvent) {
         OgsEvent::Authenticated { .. } => push_status(app),
 
         OgsEvent::MatchStarted { uuid, game_id } => {
+            diag::note("OGS", format!("match started: game {game_id}"));
             {
                 let mut live = state.live.lock().expect("live lock");
                 let Some(l) = live.as_mut() else { return };
@@ -309,6 +316,7 @@ fn handle(app: &AppHandle, event: OgsEvent) {
                 }
                 l.searching = None;
                 crate::sessions::close_game(&state);
+                crate::bot::stop(&state);
                 l.game = Some(LiveGame {
                     id: game_id,
                     my_color: None,
@@ -402,6 +410,7 @@ fn handle(app: &AppHandle, event: OgsEvent) {
         }
 
         OgsEvent::Phase { game_id, phase } => {
+            diag::note("OGS", format!("game {game_id} phase {phase}"));
             let entering_scoring = phase == "stone removal";
             if !set_game(&state, game_id, |g| g.phase = phase) {
                 return;
@@ -486,6 +495,7 @@ fn removed_string(data: &GameData) -> String {
 }
 
 fn announce_result(app: &AppHandle) {
+    crate::save_to_library(app);
     let state = app.state::<AppState>();
     let (result, mine) = {
         let game = state.game.lock().expect("game lock");
@@ -527,6 +537,7 @@ pub fn find_match(app: &AppHandle, state: &AppState, size: u8, speed: Speed) -> 
         l.rt.cancel_match(&old);
     }
     l.searching = Some(l.rt.find_match(size, speed));
+    diag::note("OGS", format!("looking for a {size}×{size} {speed:?} game"));
     drop(live);
     push_status(app);
     Ok(())

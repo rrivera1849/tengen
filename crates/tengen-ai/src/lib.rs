@@ -7,12 +7,16 @@
 //! - [`review`]: picking the lessons and building each one's fact sheet.
 //! - [`llm`]: turning fact sheets into teaching, and checking the result.
 //! - [`maxims`]: the player's maxims across games.
+//! - [`judge`]: scoring a move tried in the review's "Try again".
+//! - [`bot`]: playing as a person of a chosen rank would.
 //!
 //! The rule that runs through all of it: KataGo decides what is true; the
 //! LLM only explains it.
 
 pub mod analysis;
+pub mod bot;
 pub mod estimate;
+pub mod judge;
 pub mod katago;
 pub mod llm;
 pub mod maxims;

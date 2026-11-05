@@ -3,9 +3,13 @@
 //! logic lives in the crates; this file only wires them up.
 
 mod ai;
+mod bot;
+mod diag;
 mod keychain;
+mod library;
 mod live;
 mod sessions;
+mod updates;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -25,6 +29,8 @@ pub struct AppState {
     pub ogs: Mutex<OgsAdapter>,
     pub live: Mutex<Option<Live>>,
     pub sessions: Mutex<sessions::Sessions>,
+    /// A game against KataGo, when one is on the board.
+    pub bot: Mutex<Option<bot::BotGame>>,
 }
 
 impl AppState {
@@ -55,6 +61,8 @@ pub struct View {
     komi: f32,
     /// Set while a live game is open.
     live: Option<live::LiveView>,
+    /// Set while a game against KataGo is on the board.
+    bot: Option<bot::BotView>,
 }
 
 pub fn view(game: &Game, live: Option<live::LiveView>) -> View {
@@ -81,6 +89,7 @@ pub fn view(game: &Game, live: Option<live::LiveView>) -> View {
         server: game.info.server.clone(),
         komi: game.info.komi,
         live,
+        bot: None,
     }
 }
 
@@ -90,8 +99,11 @@ pub fn current_view(state: &AppState) -> View {
     let live = state.live.lock().expect("live lock");
     let ogs = live.as_ref().and_then(Live::view);
     drop(live);
+    let bot = bot::view(state);
     let game = state.game.lock().expect("game lock");
-    view(&game, ogs.or(other))
+    let mut v = view(&game, ogs.or(other));
+    v.bot = bot;
+    v
 }
 
 pub fn push_view(app: &AppHandle) {
@@ -100,7 +112,30 @@ pub fn push_view(app: &AppHandle) {
 }
 
 pub fn notify(app: &AppHandle, text: impl Into<String>) {
-    let _ = app.emit("notice", text.into());
+    let text = text.into();
+    diag::note("shown", &text);
+    let _ = app.emit("notice", text);
+}
+
+/// Keeps the game on the board in your library, unless it's already there.
+pub fn save_to_library(app: &AppHandle) {
+    let game = app
+        .state::<AppState>()
+        .game
+        .lock()
+        .expect("game lock")
+        .clone();
+    match library::save_to(&ai::data_dir(app, "games"), &game) {
+        Ok(Some(path)) => diag::note(
+            "library",
+            format!(
+                "saved {}",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            ),
+        ),
+        Ok(None) => {}
+        Err(e) => notify(app, format!("Couldn't save the game to your library: {e}")),
+    }
 }
 
 /// The live game id, when one is open and the given command should go to OGS.
@@ -115,10 +150,12 @@ fn in_live_game(state: &AppState) -> bool {
     live::in_game(state) || sessions::in_game(state)
 }
 
-/// Stops following live games; the record stays on the board.
+/// Stops following live games and any game against KataGo; the record
+/// stays on the board.
 fn close_live(state: &AppState) {
     live::close_game(state);
     sessions::close_game(state);
+    bot::stop(state);
 }
 
 fn stamp_now(game: &mut Game) {
@@ -147,8 +184,12 @@ fn new_game(state: State<'_, AppState>, size: u8, komi: f32) -> Result<View, Str
 }
 
 #[tauri::command]
-fn play(state: State<'_, AppState>, x: u8, y: u8) -> Result<View, String> {
+fn play(app: AppHandle, state: State<'_, AppState>, x: u8, y: u8) -> Result<View, String> {
     let point = Point::new(x, y);
+    if let Some(done) = bot::play(&app, point) {
+        done?;
+        return Ok(current_view(&state));
+    }
     if let Some((rt, g)) = live_game(&state).filter(|(_, g)| g.phase != "finished") {
         if g.phase != "play" {
             return Err("The game is being scored".into());
@@ -178,7 +219,11 @@ fn play(state: State<'_, AppState>, x: u8, y: u8) -> Result<View, String> {
 }
 
 #[tauri::command]
-fn pass_turn(state: State<'_, AppState>) -> Result<View, String> {
+fn pass_turn(app: AppHandle, state: State<'_, AppState>) -> Result<View, String> {
+    if let Some(done) = bot::pass(&app) {
+        done?;
+        return Ok(current_view(&state));
+    }
     if let Some((rt, g)) = live_game(&state).filter(|(_, g)| g.phase != "finished") {
         let game = state.game.lock().expect("game lock");
         if g.phase != "play" || Some(game.to_move()) != g.my_color {
@@ -200,6 +245,9 @@ fn pass_turn(state: State<'_, AppState>) -> Result<View, String> {
 fn undo(state: State<'_, AppState>) -> Result<View, String> {
     if in_live_game(&state) {
         return Err("Take-backs aren't available in live games yet".into());
+    }
+    if bot::undo(&state).is_some() {
+        return Ok(current_view(&state));
     }
     state.game.lock().expect("game lock").undo();
     Ok(current_view(&state))
@@ -335,6 +383,9 @@ fn find_match(
     size: u8,
     speed: Speed,
 ) -> Result<Vec<sessions::ServerStatus>, String> {
+    if bot::in_game(&state) {
+        return Err("Finish or resign the game against KataGo first".into());
+    }
     match server {
         Server::Ogs => live::find_match(&app, &state, size, speed)?,
         other => sessions::find_match(&app, other, size, speed)?,
@@ -350,7 +401,10 @@ fn cancel_match(state: State<'_, AppState>) -> Vec<sessions::ServerStatus> {
 }
 
 #[tauri::command]
-fn resign(state: State<'_, AppState>) -> Result<(), String> {
+fn resign(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if bot::resign(&app).is_some() {
+        return Ok(());
+    }
     if let Some((rt, g)) = live_game(&state).filter(|(_, g)| g.phase != "finished") {
         rt.resign(g.id);
         return Ok(());
@@ -397,7 +451,7 @@ async fn start_review(
     state: State<'_, AppState>,
     you: Color,
 ) -> Result<ai::ReviewView, String> {
-    if in_live_game(&state) {
+    if in_live_game(&state) || bot::in_game(&state) {
         return Err("Reviews open once the game is over".into());
     }
     ai::review(&app, you).await
@@ -424,6 +478,139 @@ fn list_maxims(app: AppHandle) -> Result<Vec<(String, Vec<String>)>, String> {
     ai::maxims(&app)
 }
 
+// ---------- playing KataGo ----------
+
+#[tauri::command]
+async fn install_human_model(app: AppHandle) -> Result<ai::AiStatus, String> {
+    ai::install_human(&app).await
+}
+
+/// A new game against KataGo at `rank`. `you` is your color; None picks one.
+#[tauri::command]
+fn new_bot_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    size: u8,
+    komi: f32,
+    you: Option<Color>,
+    rank: String,
+) -> Result<View, String> {
+    if in_live_game(&state) {
+        return Err("Finish or resign the live game first".into());
+    }
+    close_live(&state);
+    let you = you.unwrap_or_else(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        if nanos.is_multiple_of(2) {
+            Color::Black
+        } else {
+            Color::White
+        }
+    });
+    bot::start(&app, size, komi, you, &rank)?;
+    Ok(current_view(&state))
+}
+
+// ---------- review extras ----------
+
+/// Scores a move tried in "Try again" against KataGo's best.
+#[tauri::command]
+async fn judge_move(
+    app: AppHandle,
+    turn: usize,
+    x: u8,
+    y: u8,
+    played_loss: f64,
+) -> Result<tengen_ai::judge::Judgement, String> {
+    ai::judge(&app, turn, Point::new(x, y), played_loss).await
+}
+
+#[tauri::command]
+fn next_maxim(app: AppHandle) -> Option<String> {
+    ai::next_maxim(&app)
+}
+
+// ---------- your games ----------
+
+#[tauri::command]
+fn library(app: AppHandle) -> Vec<library::Entry> {
+    library::list_in(&ai::data_dir(&app, "games"), &ai::data_dir(&app, "reviews"))
+}
+
+#[tauri::command]
+fn open_library_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    file: String,
+) -> Result<View, String> {
+    if in_live_game(&state) || bot::in_game(&state) {
+        return Err("Finish or resign the game first".into());
+    }
+    let path = library::resolve(&ai::data_dir(&app, "games"), &file)
+        .ok_or("That game isn't in your library any more")?;
+    let game = library::load(&path)?;
+    close_live(&state);
+    *state.game.lock().expect("game lock") = game;
+    Ok(current_view(&state))
+}
+
+// ---------- help ----------
+
+/// Recent connection events and messages, for a bug report. Your names on
+/// each server are replaced; passwords and tokens are never recorded.
+#[tauri::command]
+fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> String {
+    let mut names = sessions::usernames(&state);
+    let statuses = sessions::statuses(&state);
+    names.extend(statuses.iter().filter_map(|s| s.username()));
+    let ai = ai::status(&app);
+    let mut header = vec![
+        ("Tengen", env!("CARGO_PKG_VERSION").to_string()),
+        (
+            "System",
+            format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        ),
+        ("KataGo", format!("{ai:?}")),
+    ];
+    for s in &statuses {
+        header.push(("Server", s.summary()));
+    }
+    let game = state.game.lock().expect("game lock");
+    header.push((
+        "Board",
+        format!(
+            "{}×{}, move {} of {}, {}",
+            game.info.size,
+            game.info.size,
+            game.cursor(),
+            game.moves().len(),
+            game.info.server.as_deref().unwrap_or("local")
+        ),
+    ));
+    drop(game);
+    diag::report(&header, &names)
+}
+
+#[tauri::command]
+async fn check_update() -> Option<updates::Update> {
+    updates::check().await
+}
+
+/// Opens a Tengen release page in the browser (and nothing else).
+#[tauri::command]
+fn open_release(app: AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !url.starts_with(&updates::release_page_prefix()) {
+        return Err("That isn't a Tengen release page".into());
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn leave_game(state: State<'_, AppState>) -> View {
     close_live(&state);
@@ -443,6 +630,7 @@ pub fn run() {
             ogs: Mutex::new(OgsAdapter::default()),
             live: Mutex::new(None),
             sessions: Mutex::new(sessions::Sessions::default()),
+            bot: Mutex::new(None),
         })
         .manage(ai::AiState::default())
         .setup(|app| {
@@ -480,7 +668,16 @@ pub fn run() {
             start_review,
             set_claude_key,
             clear_claude_key,
-            list_maxims
+            list_maxims,
+            install_human_model,
+            new_bot_game,
+            judge_move,
+            next_maxim,
+            library,
+            open_library_game,
+            diagnostics,
+            check_update,
+            open_release
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tengen");

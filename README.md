@@ -18,6 +18,10 @@ Early, but playable. What works today:
 - Sign in to Fox and play live: automatch on 9×9, 13×13 or 19×19, clocks, and Fox's own counting at the end
 - A score estimate on one key (E), from KataGo running on your Mac: the score, who owns what, and dead stones
 - An AI review (R) of any finished game: a score graph, up to five of your mistakes and three of your opponent's, each with KataGo's better line, a plain-language lesson from Claude, and a maxim to carry into your next game. Saved SGFs keep the lessons as comments
+- Play KataGo offline at the strength you choose, from 20k to 6d, playing the way people of that rank do
+- Your games: online games and games against KataGo save themselves, and **Your games** (⌘Y) lists them with which ones you've reviewed
+- A soft tick in your last ten seconds, an optional click-twice-to-place for fast games, a maxim from your reviews while you wait for an opponent, and "Reconnecting" over the board if a server drops mid-game
+- A quiet notice when a newer Tengen is on GitHub, and **Copy diagnostics** (in Play online) for bug reports
 
 KGS, Pandanet and Fox are new and haven't been through full games on the real servers yet; expect a fix or two after the first games.
 
@@ -31,7 +35,7 @@ npm run tauri dev      # opens the app with live reload
 npm run tauri build    # makes Tengen.app and a .dmg in src-tauri/target/release/bundle
 ```
 
-`npm run dev` alone opens the interface in a browser with a sample position, which is handy for design work. Add `?live` to the address to preview a live game with clocks.
+`npm run dev` alone opens the interface in a browser with a sample position, which is handy for design work. Add `?live` to the address to preview a live game with clocks (`?live&offline` shows it reconnecting, `?signedin&searching` the search with a maxim, `?update` the update notice).
 
 ## Signing in to OGS
 
@@ -77,9 +81,17 @@ TENGEN_KATAGO=/opt/homebrew/bin/katago TENGEN_KATAGO_MODEL=~/Downloads/kata1-b18
 
 **Claude.** Written lessons need a Claude API key from [console.anthropic.com](https://console.anthropic.com). Add it from the review panel; it's stored in the macOS Keychain. Without a key the review still shows the score graph and KataGo's better lines. Only positions and KataGo's facts are sent, never player names.
 
-The review circles your mistakes on the board in orange and your opponent's in blue; click one to read its lesson. **Try again** sets up each position before your mistakes so you can look for the better move yourself, with three tries and a hint, before KataGo's line is shown. The graph under the board shows who led, and dragging along it moves through the game.
+The review circles your mistakes on the board in orange and your opponent's in blue; click one to read its lesson. **Try again** sets up each position before your mistakes so you can look for the better move yourself, with three tries and a hint, before KataGo's line is shown. KataGo scores each move you try: one within a point of its own choice counts, and one that's clearly better than the game's move gets a "closer". The graph under the board shows who led, and dragging along it moves through the game.
 
 Analyses and reviews are cached in Tengen's Application Support folder, so reopening a review is instant. Your maxims collect there too, and a review notices when the same kind of lesson keeps coming back.
+
+## Playing KataGo
+
+Choose **New game** (⌘N), then **KataGo**, a strength from 20k to 6d, your color and a board size. KataGo plays with its human-style network, trained on people's games: each move is drawn from what players of that rank tend to play, so it makes their kind of moves and mistakes rather than playing perfectly and holding back. It's a one-time download of about 100 MB the first time, checked against a pinned SHA-256. KataGo resigns once it has been clearly lost for a few moves, and when you both pass it counts the game and shows whose area is whose. The game saves itself to **Your games**, ready to review.
+
+## Help and updates
+
+**Copy diagnostics**, at the bottom of **Play online**, copies recent connection events and messages for a GitHub issue. Your names on each server are replaced with `<you>`, and passwords and tokens are never recorded. On launch Tengen asks GitHub once whether a newer release is out, and if so shows a small link next to its name.
 
 ## Keys
 
@@ -90,15 +102,16 @@ Analyses and reviews are cached in Tengen's Application Support folder, so reope
 | E | Show or hide the score estimate |
 | R | Review the game |
 | Z | Zen mode: only the board and the clocks |
-| Esc | Hide the estimate or a better line, leave a try or a lesson, close the review, leave zen mode |
+| Esc | Drop a stone waiting for its second click, hide the estimate or a better line, leave a try or a lesson, close the review, leave zen mode |
 | ← → | Step back or forward through the game |
 | Home, End | Jump to the start or the end |
-| ⌘Z | Take back the last move |
+| ⌘Z | Take back the last move (against KataGo, your move and its answer) |
 | ⌘N | New game |
 | ⌘O | Open an SGF file |
 | ⌘S | Save the game as SGF |
 | ⌘D | Get a game from OGS |
 | ⌘L | Play online |
+| ⌘Y | Your games |
 
 ## How it's built
 
@@ -121,6 +134,9 @@ Every server plugs into the interfaces in `tengen-core` (`ServerAdapter` for rec
 cargo test                                   # rules, SGF, adapters
 cargo test -p tengen-ogs -- --ignored        # also downloads a real game from OGS
 TENGEN_KATAGO=… TENGEN_KATAGO_MODEL=… cargo test -p tengen-ai --test real_katago   # against a real KataGo
+TENGEN_KATAGO=… TENGEN_KATAGO_MODEL=… TENGEN_KATAGO_HUMAN_MODEL=… cargo test -p tengen-ai --test real_bot
+                                             # judging tries and playing as a person, against a real KataGo
+npm test                                     # the interface's Try again and clock logic
 ```
 
 ## Fox

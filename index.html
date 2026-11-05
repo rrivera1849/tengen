@@ -11,7 +11,7 @@
 
     <main class="stage">
       <header class="top">
-        <p class="brand">Tengen</p>
+        <p class="brand">Tengen <button class="update" id="update" type="button" hidden></button></p>
         <p class="result" id="result" aria-live="polite"></p>
         <p class="game-info" id="game-info"></p>
       </header>
@@ -41,6 +41,7 @@
             <div class="board-shadow" aria-hidden="true"></div>
             <svg id="board" role="img" aria-label="Go board"></svg>
             <div class="board-edge" aria-hidden="true"></div>
+            <p class="reconnecting" id="reconnecting" role="status" hidden><span class="pulse" aria-hidden="true"></span><span id="reconnecting-text">Reconnecting</span></p>
           </div>
           <div class="review-graph" id="review-graph"></div>
         </div>
@@ -67,11 +68,12 @@
       <nav class="bar" data-mode="review" aria-label="Game controls">
         <div class="group" data-for="review">
           <button class="icon" data-action="new" aria-label="New game" title="New game (⌘N)"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M12 9v6M9 12h6"/></svg></button>
+          <button class="icon" data-action="games" aria-label="Your games" title="Your games (⌘Y)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M5 10h14M5 15h9M5 20h6"/></svg></button>
           <button class="icon" data-action="open" aria-label="Open SGF" title="Open SGF (⌘O)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
           <button class="icon" data-action="ogs" aria-label="Get a game from OGS" title="Get a game from OGS (⌘D)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M5 19h14"/></svg></button>
           <button class="icon" data-action="save" aria-label="Save SGF" title="Save SGF (⌘S)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h9l3 3v13H6z"/><path d="M9 4v5h6"/><path d="M9 20v-6h6v6"/></svg></button>
         </div>
-        <div class="group" data-for="live">
+        <div class="group" data-for="live bot">
           <button data-action="pass"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg>Pass</button>
           <button data-action="resign"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8.5 8.5l7 7"/></svg>Resign</button>
         </div>
@@ -80,6 +82,7 @@
           <button data-action="resign"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8.5 8.5l7 7"/></svg>Resign</button>
         </div>
         <div class="group" data-for="finished">
+          <button data-action="review" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Review this game</button>
           <button data-action="save"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h9l3 3v13H6z"/><path d="M9 4v5h6"/><path d="M9 20v-6h6v6"/></svg>Save</button>
           <button data-action="leave"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Done</button>
         </div>
@@ -93,16 +96,19 @@
         <span class="sep" aria-hidden="true"></span>
         <div class="group">
           <button data-action="estimate" id="estimate-button" aria-pressed="false" title="Score estimate (E)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16"/><path d="M5 8h14"/><path d="M5 8l-2.5 6a3 3 0 0 0 5 0z"/><path d="M19 8l-2.5 6a3 3 0 0 0 5 0z"/></svg>Estimate</button>
-          <button data-action="review" data-for="review finished" title="Review (R)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Review</button>
+          <button data-action="review" data-for="review" title="Review (R)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Review</button>
           <button data-action="online" data-for="review finished" title="Play online (⌘L)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17"/></svg>Online</button>
           <button data-action="look" title="Board"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 12h16M12 4v16"/></svg>Board</button>
         </div>
       </nav>
 
       <div class="searching" id="searching" hidden>
-        <span class="pulse" aria-hidden="true"></span>
-        <span id="searching-text">Looking for an opponent</span>
-        <button data-action="cancel-match">Cancel</button>
+        <div class="searching-row">
+          <span class="pulse" aria-hidden="true"></span>
+          <span id="searching-text">Looking for an opponent</span>
+          <button data-action="cancel-match">Cancel</button>
+        </div>
+        <p class="searching-maxim" id="searching-maxim" hidden></p>
       </div>
 
       <p class="notice" id="notice" role="status" aria-live="polite"></p>
@@ -111,12 +117,68 @@
     <dialog id="new-dialog">
       <form method="dialog">
         <h2>New game</h2>
-        <div class="choices" role="radiogroup" aria-label="Board size">
+        <p class="group-label">Opponent</p>
+        <div class="choices" data-new="opponent">
+          <button value="self">Yourself</button>
+          <button value="katago">KataGo</button>
+        </div>
+        <div data-when-opponent="katago">
+          <p class="group-label">Strength</p>
+          <div class="choices ranks" data-new="rank"></div>
+          <p class="hint">KataGo plays the way people of that rank do, mistakes included.</p>
+          <p class="group-label">You play</p>
+          <div class="choices" data-new="color">
+            <button value="black">Black</button>
+            <button value="white">White</button>
+            <button value="random">Either</button>
+          </div>
+        </div>
+        <p class="group-label">Board</p>
+        <div class="choices" data-new="size">
           <button value="9">9 × 9</button>
           <button value="13">13 × 13</button>
-          <button value="19" autofocus>19 × 19</button>
+          <button value="19">19 × 19</button>
         </div>
-        <button class="quiet" value="cancel">Cancel</button>
+        <div class="row">
+          <button class="quiet" value="cancel">Cancel</button>
+          <button value="start" class="primary">Start</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="human-dialog">
+      <form method="dialog">
+        <h2>Play against KataGo</h2>
+        <p class="lede">To play like a person of the strength you choose, KataGo needs its human-style network: a one-time download of about 100 MB.</p>
+        <p class="hint" id="human-progress"></p>
+        <div class="row">
+          <button class="quiet" value="cancel">Not now</button>
+          <button value="download" class="primary">Download</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="games-dialog" class="wide">
+      <form method="dialog">
+        <h2>Your games</h2>
+        <p class="hint">Online games and games against KataGo are kept here when they end.</p>
+        <div class="games" id="games-list"></div>
+        <div class="row">
+          <button class="quiet" value="close">Done</button>
+          <button value="file">Open a file…</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="diagnostics-dialog" class="wide">
+      <form method="dialog">
+        <h2>Diagnostics</h2>
+        <p class="lede">Copy this into a GitHub issue. Your names are replaced with &lt;you&gt;, and passwords are never recorded.</p>
+        <textarea id="diagnostics-text" readonly spellcheck="false" aria-label="Diagnostics"></textarea>
+        <div class="row">
+          <button class="quiet" value="close">Done</button>
+          <button type="button" class="primary" id="diagnostics-copy">Copy</button>
+        </div>
       </form>
     </dialog>
 
@@ -186,6 +248,7 @@
             <button value="find" class="primary">Find opponent</button>
           </div>
         </div>
+        <p class="help-line"><button type="button" class="link" data-action="diagnostics">Having trouble? Copy diagnostics</button></p>
       </form>
     </dialog>
 
@@ -272,6 +335,11 @@
           <button value="coords">Coordinates</button>
           <button value="sound">Stone sound</button>
           <button value="zen">Zen mode (Z)</button>
+        </div>
+        <p class="group-label">Playing</p>
+        <div class="choices" data-setting="toggles">
+          <button value="confirm">Click twice to place</button>
+          <button value="tick">Low-time tick</button>
         </div>
         <button class="quiet" value="close">Done</button>
       </form>

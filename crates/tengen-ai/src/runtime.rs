@@ -6,7 +6,8 @@
 //! that release lists each file with its SHA-256, checked after download.
 //!
 //! Lookup order:
-//! 1. `TENGEN_KATAGO` and `TENGEN_KATAGO_MODEL`, for development.
+//! 1. `TENGEN_KATAGO`, `TENGEN_KATAGO_MODEL` and `TENGEN_KATAGO_HUMAN_MODEL`,
+//!    for development.
 //! 2. Tengen's own copy in Application Support.
 //! 3. A Homebrew `katago`, still using the network from Tengen's folder.
 
@@ -28,8 +29,18 @@ const HOMEBREW: [&str; 2] = ["/opt/homebrew/bin/katago", "/usr/local/bin/katago"
 pub struct Runtime {
     pub binary: PathBuf,
     pub model: PathBuf,
+    /// KataGo's network trained on human games, for playing like a person
+    /// of a chosen rank. Optional: downloaded the first time it's wanted.
+    pub human_model: Option<PathBuf>,
     pub config: PathBuf,
 }
+
+/// KataGo's human-style network, published with KataGo 1.15.
+pub const HUMAN_MODEL_URL: &str =
+    "https://github.com/lightvector/KataGo/releases/download/v1.15.0/b18c384nbt-humanv0.bin.gz";
+pub const HUMAN_MODEL_SHA256: &str =
+    "637746e44f0efe00ad1245a50aa9bbf0716efe364c43965ead97bd6835d84ab5";
+pub const HUMAN_MODEL_FILE: &str = "human.bin.gz";
 
 #[derive(Debug, Deserialize)]
 pub struct Manifest {
@@ -62,10 +73,13 @@ pub fn locate(dir: &Path) -> Option<Runtime> {
         .or_else(|| HOMEBREW.iter().map(PathBuf::from).find(|p| p.exists()))?;
     let model = env("TENGEN_KATAGO_MODEL")
         .or_else(|| Some(dir.join("model.bin.gz")).filter(|p| p.exists()))?;
+    let human_model = env("TENGEN_KATAGO_HUMAN_MODEL")
+        .or_else(|| Some(dir.join(HUMAN_MODEL_FILE)).filter(|p| p.exists()));
     let config = write_config(dir).ok()?;
     Some(Runtime {
         binary,
         model,
+        human_model,
         config,
     })
 }
@@ -137,38 +151,11 @@ pub async fn install(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<R
         }
         let target = dir.join(&f.name);
         let partial = dir.join(format!("{}.part", f.name));
-        let resp = http
-            .get(&f.url)
-            .send()
-            .await
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| AiError::Download(format!("{}: {e}", f.name)))?;
-        let mut file = tokio::fs::File::create(&partial)
-            .await
-            .map_err(|e| AiError::Download(e.to_string()))?;
-        let mut hash = Sha256::new();
-        let mut stream = resp.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| AiError::Download(format!("{}: {e}", f.name)))?;
-            hash.update(&chunk);
-            file.write_all(&chunk)
-                .await
-                .map_err(|e| AiError::Download(e.to_string()))?;
-            done += chunk.len() as u64;
+        fetch_checked(&http, &f.url, &f.sha256, &partial, &f.name, |n| {
+            done += n;
             progress(done, total);
-        }
-        file.flush()
-            .await
-            .map_err(|e| AiError::Download(e.to_string()))?;
-        drop(file);
-        let digest: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
-        if !digest.eq_ignore_ascii_case(f.sha256.trim()) {
-            let _ = tokio::fs::remove_file(&partial).await;
-            return Err(AiError::Download(format!(
-                "{} didn't match its checksum",
-                f.name
-            )));
-        }
+        })
+        .await?;
         #[cfg(unix)]
         if f.executable {
             use std::os::unix::fs::PermissionsExt;
@@ -188,6 +175,99 @@ pub async fn install(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<R
     locate(dir).ok_or_else(|| {
         AiError::Download("the download finished but KataGo is still missing".into())
     })
+}
+
+/// Downloads `url` to `partial`, checking it against `sha256`; the partial
+/// file is removed if it doesn't match. `got(bytes)` is called per chunk.
+async fn fetch_checked(
+    http: &reqwest::Client,
+    url: &str,
+    sha256: &str,
+    partial: &Path,
+    name: &str,
+    mut got: impl FnMut(u64),
+) -> Result<(), AiError> {
+    let resp = http
+        .get(url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| AiError::Download(format!("{name}: {e}")))?;
+    let mut file = tokio::fs::File::create(partial)
+        .await
+        .map_err(|e| AiError::Download(e.to_string()))?;
+    let mut hash = Sha256::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| AiError::Download(format!("{name}: {e}")))?;
+        hash.update(&chunk);
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| AiError::Download(e.to_string()))?;
+        got(chunk.len() as u64);
+    }
+    file.flush()
+        .await
+        .map_err(|e| AiError::Download(e.to_string()))?;
+    drop(file);
+    let digest: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if !digest.eq_ignore_ascii_case(sha256.trim()) {
+        let _ = tokio::fs::remove_file(partial).await;
+        return Err(AiError::Download(format!(
+            "{name} didn't match its checksum"
+        )));
+    }
+    Ok(())
+}
+
+/// Downloads KataGo's human-style network into `dir`, checked against the
+/// checksum pinned above. `progress(done, total)` as data arrives.
+pub async fn install_human_model(
+    dir: &Path,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<PathBuf, AiError> {
+    install_human_model_from(dir, HUMAN_MODEL_URL, HUMAN_MODEL_SHA256, &mut progress).await
+}
+
+async fn install_human_model_from(
+    dir: &Path,
+    url: &str,
+    sha256: &str,
+    progress: &mut impl FnMut(u64, u64),
+) -> Result<PathBuf, AiError> {
+    let http = reqwest::Client::builder()
+        .user_agent(concat!("Tengen/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| AiError::Download(e.to_string()))?;
+    tokio::fs::create_dir_all(dir)
+        .await
+        .map_err(|e| AiError::Download(e.to_string()))?;
+    let total = http
+        .head(url)
+        .send()
+        .await
+        .ok()
+        .and_then(|r| r.content_length())
+        .unwrap_or(0);
+    let target = dir.join(HUMAN_MODEL_FILE);
+    let partial = dir.join(format!("{HUMAN_MODEL_FILE}.part"));
+    let mut done = 0;
+    fetch_checked(
+        &http,
+        url,
+        sha256,
+        &partial,
+        "the human-style network",
+        |n| {
+            done += n;
+            progress(done, total);
+        },
+    )
+    .await?;
+    tokio::fs::rename(&partial, &target)
+        .await
+        .map_err(|e| AiError::Download(e.to_string()))?;
+    Ok(target)
 }
 
 /// Unpacks a checked `.tar.gz` with the system's `tar`, refusing any entry

@@ -2,17 +2,19 @@
 // doubles as a scrubber), and your mistakes circled on the board. You can
 // try each position again before seeing KataGo's move.
 
-import type { Color, LessonView, Progress, Review } from "./api";
+import type { Color, Judgement, LessonView, Progress, Review } from "./api";
 import type { Line, Marks } from "./board";
+import { afterTry, TRIES } from "./quiz";
 
 const NS = "http://www.w3.org/2000/svg";
-const TRIES = 3;
 
 export interface PanelHooks {
   /** Show a position with a better line drawn on it. */
   open: (turn: number, line: Line) => Promise<void>;
   /** Move to a turn. */
   jump: (turn: number) => Promise<void>;
+  /** KataGo's verdict on a move tried at the position after `turn` moves. */
+  judge: (turn: number, x: number, y: number, playedLoss: number) => Promise<Judgement>;
   /** Draw (or with null, clear) circles, targets and hints on the board. */
   marks: (m: Marks | null) => void;
   /** A wrong try, shown on the board for a moment. */
@@ -43,6 +45,8 @@ type State =
       /** Set once the move is found or shown. */
       outcome: "found" | "shown" | null;
       note: string;
+      /** True while KataGo judges a try. */
+      checking: boolean;
     };
 
 let review: Review | null = null;
@@ -137,27 +141,48 @@ export function setCursor(c: number) {
 /** A click on an empty point. True when the review takes it as a try. */
 export function tryMove(x: number, y: number): boolean {
   if (state.kind !== "quiz") return false;
-  if (state.outcome) return true;
-  const q = state.questions[state.step];
-  if (x === q.answer[0] && y === q.answer[1]) {
-    state.outcome = "found";
-    state.note = state.tries === 0 ? "Found it, first try." : "Found it.";
-    reveal(q);
+  if (state.outcome || state.checking) return true;
+  const quiz = state;
+  const q = quiz.questions[quiz.step];
+  const exact = x === q.answer[0] && y === q.answer[1];
+  const played = !!q.played && x === q.played[0] && y === q.played[1];
+  if (exact || played) {
+    settle(afterTry(null, { exact, played, triesBefore: quiz.tries }), x, y);
     return true;
+  }
+  // Ask KataGo how the move compares with its own choice.
+  quiz.checking = true;
+  quiz.note = "Checking with KataGo";
+  render();
+  const loss = review!.lessons[q.lesson].pointsLost;
+  hooks
+    .judge(q.turn, x, y, loss)
+    .catch(() => null)
+    .then((j) => {
+      if (state !== quiz) return; // the question was left meanwhile
+      quiz.checking = false;
+      settle(afterTry(j, { exact: false, played: false, triesBefore: quiz.tries }), x, y);
+    });
+  return true;
+}
+
+function settle(r: ReturnType<typeof afterTry>, x: number, y: number) {
+  if (state.kind !== "quiz") return;
+  const q = state.questions[state.step];
+  state.note = r.note;
+  if (r.kind === "found") {
+    state.outcome = "found";
+    reveal(q);
+    return;
   }
   state.tries += 1;
   hooks.miss(x, y, q.color);
-  const left = TRIES - state.tries;
-  if (left <= 0) {
+  if (r.kind === "shown") {
     state.outcome = "shown";
-    state.note = "Here's KataGo's move.";
     reveal(q);
-    return true;
+    return;
   }
-  const same = q.played && x === q.played[0] && y === q.played[1];
-  state.note = `${same ? "That's the move that was played." : "Not that one."} ${left === 1 ? "One try" : "Two tries"} left.`;
   render();
-  return true;
 }
 
 /** Ring clicks on the board open that moment. */
@@ -243,7 +268,7 @@ function question(l: LessonView, index: number): Question | null {
 
 function startQuiz(qs: Question[]) {
   if (!qs.length) return;
-  state = { kind: "quiz", questions: qs, step: 0, tries: 0, hinted: false, outcome: null, note: "" };
+  state = { kind: "quiz", questions: qs, step: 0, tries: 0, hinted: false, outcome: null, note: "", checking: false };
   goToQuestion();
 }
 
@@ -284,7 +309,7 @@ function quizCard(s: Extract<State, { kind: "quiz" }>) {
     : `Move ${move}. ${mover} to play: punish ${other(q.color) === "black" ? "Black" : "White"}'s last move.`;
   c.append(el("p", "try-title", ask));
   if (!s.outcome) {
-    c.append(el("p", "try-text", s.note || `Click where you'd play. You have ${words(TRIES)} tries before Tengen shows you.`));
+    c.append(el("p", `try-text${s.checking ? " checking" : ""}`, s.note || `Click where you'd play. You have ${words(TRIES)} tries before Tengen shows you.`));
     const row = el("div", "try-buttons");
     row.append(button(s.hinted ? "Hint shown" : "Give me a hint", () => {
       if (state.kind !== "quiz") return;
@@ -322,7 +347,7 @@ function quizCard(s: Extract<State, { kind: "quiz" }>) {
       hooks.jump(review!.leads.length - 1);
       return;
     }
-    Object.assign(state, { step: state.step + 1, tries: 0, hinted: false, outcome: null, note: "" });
+    Object.assign(state, { step: state.step + 1, tries: 0, hinted: false, outcome: null, note: "", checking: false });
     goToQuestion();
   }, "solid"));
   c.append(row);

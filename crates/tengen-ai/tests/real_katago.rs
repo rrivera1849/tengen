@@ -43,7 +43,7 @@ fn sample_game() -> Game {
 #[tokio::test(flavor = "multi_thread")]
 async fn analyses_estimates_and_reviews_with_real_katago() {
     let Some(rt) = runtime_or_skip() else { return };
-    let engine = Engine::start(&rt.binary, &rt.model, &rt.config)
+    let engine = Engine::start(&rt.binary, &rt.model, rt.human_model.as_deref(), &rt.config)
         .await
         .expect("KataGo starts");
     let game = sample_game();

@@ -1,9 +1,9 @@
 import "@fontsource-variable/fraunces/opsz.css";
 import "@fontsource-variable/fraunces/opsz-italic.css";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, inApp, onEvents, previewClock, type Color, type ServerName, type ServerStatus, type Speed, type View } from "./api";
+import { api, inApp, onEvents, previewClock, RANKS, type Color, type LibraryEntry, type ServerName, type ServerStatus, type Speed, type View } from "./api";
 import { BoardView, type Look, type StoneStyle, type Texture } from "./board";
-import { setClock } from "./clock";
+import { setClock, setTicking } from "./clock";
 import * as panel from "./review";
 import { click } from "./sound";
 
@@ -15,13 +15,23 @@ interface Settings extends Look {
   zen: boolean;
   /** Day, night, or whatever the Mac is set to. */
   theme: Theme;
+  /** In live and KataGo games, the first click shows the stone and the second places it. */
+  confirm: boolean;
+  /** A soft tick each second when your time is nearly out. */
+  tick: boolean;
+  /** Last choices in New game. */
+  newOpponent: "self" | "katago";
+  botRank: string;
+  botColor: Color | "random";
+  newSize: number;
   matchSize: number;
   matchSpeed: Speed;
   matchServer: ServerName;
 }
 
 const DEFAULTS: Settings = {
-  texture: "kaya", stones: "shell", coords: false, sound: true, zen: false, theme: "system", matchSize: 19, matchSpeed: "rapid", matchServer: "OGS",
+  texture: "kaya", stones: "shell", coords: false, sound: true, zen: false, theme: "system",
+  confirm: false, tick: true, newOpponent: "self", botRank: "5k", botColor: "black", newSize: 19, matchSize: 19, matchSpeed: "rapid", matchServer: "OGS",
 };
 
 function loadSettings(): Settings {
@@ -94,9 +104,10 @@ applyTheme(settings.theme);
 
 // ---------- rendering ----------
 
-type Mode = "review" | "live" | "scoring" | "finished";
+type Mode = "review" | "live" | "scoring" | "finished" | "bot";
 
 function mode(v: View): Mode {
+  if (v.bot) return v.bot.over ? "finished" : "bot";
   if (!v.live) return "review";
   if (v.live.phase === "stone removal") return "scoring";
   if (v.live.phase === "finished") return "finished";
@@ -105,6 +116,8 @@ function mode(v: View): Mode {
 
 /** The score estimate stays on (and follows the game) until E or Esc. */
 let estimateOn = false;
+/** Whether the end-of-game count was shown for the KataGo game on the board. */
+let botCounted = false;
 /** The turn a lesson's better line belongs to; moving away hides the line. */
 let lineTurn: number | null = null;
 
@@ -118,11 +131,17 @@ function show(v: View) {
   }
   panel.setCursor(v.cursor);
   const m = mode(v);
+  const me = v.live?.myColor ?? v.bot?.you ?? null;
   // Your side sits nearest you: at the bottom when the players are stacked.
-  document.body.classList.toggle("me-white", v.live?.myColor === "white");
+  document.body.classList.toggle("me-white", me === "white");
   document.body.dataset.mode = m;
-  board.interactive = m === "review" || (m === "live" && v.toMove === v.live?.myColor);
+  board.interactive =
+    m === "review" ||
+    (m === "live" && v.toMove === v.live?.myColor) ||
+    (m === "bot" && v.toMove === v.bot?.you && !v.bot?.thinking);
   board.marking = m === "scoring" && !!v.live?.markDead;
+  board.confirm = settings.confirm && (m === "live" || m === "bot");
+  setTicking(settings.tick && m === "live" ? (v.live?.myColor ?? null) : null);
   board.update(v);
   if (placed && settings.sound) click();
 
@@ -131,9 +150,10 @@ function show(v: View) {
   $("#mu-black").textContent = [v.black, v.blackRank].filter(Boolean).join(" ");
   $("#mu-white").textContent = [v.white, v.whiteRank].filter(Boolean).join(" ");
   $("#game-info").textContent = `${v.server ? `${v.server} game` : "Local game"}, ${v.size} × ${v.size}`;
-  const mineToMove = !!v.live && v.live.myColor === v.toMove;
+  const mineToMove = me !== null && me === v.toMove;
+  const thinking = !!v.bot?.thinking;
   document.querySelectorAll(".player .turn-text").forEach((el) => {
-    el.textContent = mineToMove ? "Your move" : "To play";
+    el.textContent = mineToMove ? "Your move" : thinking ? "Thinking" : "To play";
   });
   $("#black-meta").textContent = meta(v.blackRank, v.capturesBlack, mine(v, "black"));
   $("#white-meta").textContent = meta(v.whiteRank, v.capturesWhite, mine(v, "white"), `komi ${v.komi}`);
@@ -143,7 +163,14 @@ function show(v: View) {
   });
 
   $(".bar").dataset.mode = m;
-  if (m === "review" || m === "finished") setClock(null);
+  if (m === "review" || m === "finished" || m === "bot") setClock(null);
+  syncReconnecting();
+  // A game against KataGo counted at the end: show whose area is whose.
+  if (v.bot?.over && !botCounted && v.result && !v.result.includes("R")) {
+    botCounted = true;
+    setEstimate(true);
+  }
+  if (!v.bot?.over) botCounted = false;
 
   const scrub = $<HTMLInputElement>("#scrub");
   scrub.max = String(v.total);
@@ -229,6 +256,7 @@ async function ensureKatago(): Promise<boolean> {
 async function startReview() {
   if (!view) return;
   if (view.live && view.live.phase !== "finished") return notify("Reviews open once the game is over");
+  if (view.bot && !view.bot.over) return notify("Reviews open once the game is over");
   if (view.total < 10) return notify("This game is too short to review");
   if (!(await ensureKatago())) return;
   let you: Color | null = await api.reviewSide().catch(() => null);
@@ -299,6 +327,7 @@ panel.initPanel({
       board.setLine(line);
     }),
   jump: (turn) => runView(() => api.goTo(turn)),
+  judge: (turn, x, y, playedLoss) => api.judgeMove(turn, x, y, playedLoss),
   marks: (m) => board.setMarks(m),
   miss: (x, y, color) => board.flashMiss(x, y, color),
   addKey: () => editKey(),
@@ -316,11 +345,40 @@ function meta(rank: string | null, captures: number, ...extra: (string | null)[]
 /** What each server is called in the interface. */
 const SERVER_LABEL: Record<ServerName, string> = { OGS: "OGS", KGS: "KGS", IGS: "Pandanet", Fox: "Fox" };
 
+/** What each server's games are called on the board (`View.server`). */
+const SERVER_OF_LABEL: Record<string, ServerName> = { OGS: "OGS", KGS: "KGS", Pandanet: "IGS", IGS: "IGS", Fox: "Fox" };
+
+let maximShown = false;
+
 function showServers(list: ServerStatus[]) {
   servers = list;
   const looking = list.find((s) => s.searching);
   $("#searching").hidden = !looking;
   if (looking) $("#searching-text").textContent = `Looking for an opponent on ${SERVER_LABEL[looking.server]}`;
+  // While you wait: a maxim from your reviews to carry into the game.
+  if (looking && !maximShown) {
+    maximShown = true;
+    api.nextMaxim().then((m) => {
+      const el = $("#searching-maxim");
+      el.textContent = m ? `For this game: ${m}` : "";
+      el.hidden = !m;
+    }).catch(() => {});
+  }
+  if (!looking) {
+    maximShown = false;
+    $("#searching-maxim").hidden = true;
+  }
+  syncReconnecting();
+}
+
+/** "Reconnecting" over the board while a live game's server is out of reach. */
+function syncReconnecting() {
+  const v = view;
+  const server = v?.live && v.live.phase !== "finished" && v.server ? SERVER_OF_LABEL[v.server] : undefined;
+  const s = server && servers.find((x) => x.server === server);
+  const lost = !!s && s.signedIn && !s.connected;
+  $("#reconnecting").hidden = !lost;
+  if (lost) $("#reconnecting-text").textContent = `Reconnecting to ${SERVER_LABEL[server!]}`;
 }
 
 let noticeTimer = 0;
@@ -360,7 +418,9 @@ board.onRing = (i) => panel.openLessonAt(i);
 board.onMark = (x, y) => runView(() => api.play(x, y));
 
 const actions: Record<string, () => void> = {
-  new: () => dialog("new-dialog").showModal(),
+  new: () => openNewGame(),
+  games: () => openGames(),
+  diagnostics: () => copyDiagnostics(),
   open: () => runView(api.openSgf),
   save: () => run(api.saveSgf, (path) => path && notify(`Saved ${path.split("/").pop()}`)),
   ogs: () => {
@@ -387,10 +447,181 @@ document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((b) => {
   b.addEventListener("click", () => actions[b.dataset.action!]?.());
 });
 
-dialog("new-dialog").addEventListener("close", (e) => {
-  const size = Number((e.target as HTMLDialogElement).returnValue);
-  if (size) runView(() => api.newGame(size, size === 19 ? 6.5 : 5.5));
+// ---------- new games: yourself or KataGo ----------
+
+function openNewGame() {
+  const ranks = $("#new-dialog [data-new=rank]");
+  if (!ranks.childElementCount) {
+    for (const r of RANKS) {
+      const b = document.createElement("button");
+      b.value = r;
+      b.textContent = r;
+      ranks.append(b);
+    }
+  }
+  syncNewGame();
+  dialog("new-dialog").showModal();
+}
+
+function syncNewGame() {
+  const current: Record<string, string> = {
+    opponent: settings.newOpponent,
+    rank: settings.botRank,
+    color: settings.botColor,
+    size: String(settings.newSize),
+  };
+  document.querySelectorAll<HTMLElement>("#new-dialog [data-new]").forEach((group) => {
+    group.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
+      b.setAttribute("aria-pressed", String(b.value === current[group.dataset.new!]));
+    });
+  });
+  $("#new-dialog [data-when-opponent]").hidden = settings.newOpponent !== "katago";
+}
+
+document.querySelectorAll<HTMLElement>("#new-dialog [data-new]").forEach((group) => {
+  group.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest("button");
+    if (!b) return;
+    e.preventDefault();
+    const kind = group.dataset.new;
+    if (kind === "opponent") settings.newOpponent = b.value as Settings["newOpponent"];
+    if (kind === "rank") settings.botRank = b.value;
+    if (kind === "color") settings.botColor = b.value as Settings["botColor"];
+    if (kind === "size") settings.newSize = Number(b.value);
+    saveSettings(settings);
+    syncNewGame();
+  });
 });
+
+dialog("new-dialog").addEventListener("close", async (e) => {
+  if ((e.target as HTMLDialogElement).returnValue !== "start") return;
+  const size = settings.newSize;
+  const komi = size === 19 ? 6.5 : 5.5;
+  if (settings.newOpponent === "self") return runView(() => api.newGame(size, komi));
+  if (!(await ensureKatago()) || !(await ensureHumanModel())) return;
+  setEstimate(false);
+  const you = settings.botColor === "random" ? null : settings.botColor;
+  runView(() => api.newBotGame(size, komi, you, settings.botRank));
+});
+
+/** KataGo's human-style network, downloaded on first use. */
+async function ensureHumanModel(): Promise<boolean> {
+  const status = await api.aiStatus().catch(() => null);
+  if (status?.humanModel) return true;
+  $("#human-progress").textContent = "";
+  if ((await ask("human-dialog")) !== "download") return false;
+  const d = dialog("human-dialog");
+  const row = d.querySelector<HTMLElement>(".row")!;
+  row.hidden = true;
+  $("#human-progress").textContent = "Starting the download";
+  d.showModal();
+  try {
+    await api.installHumanModel();
+    notify("KataGo is ready to play");
+    return true;
+  } catch (err) {
+    notify(explain(err));
+    return false;
+  } finally {
+    d.close();
+    row.hidden = false;
+  }
+}
+
+// ---------- your games ----------
+
+async function openGames() {
+  const list = $("#games-list");
+  list.replaceChildren();
+  const games = await api.library().catch((e) => {
+    notify(explain(e));
+    return [] as LibraryEntry[];
+  });
+  if (!games.length) {
+    const p = document.createElement("p");
+    p.className = "lede";
+    p.textContent = "Games you finish online or against KataGo will appear here.";
+    list.append(p);
+  }
+  for (const g of games) list.append(gameRow(g));
+  dialog("games-dialog").showModal();
+}
+
+function gameRow(g: LibraryEntry) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "game-row";
+  const who = (name: string, rank: string | null) => (rank ? `${name} (${rank})` : name);
+  const title = document.createElement("span");
+  title.className = "game-title";
+  title.textContent = `${who(g.black, g.blackRank)} vs ${who(g.white, g.whiteRank)}`;
+  const meta = document.createElement("span");
+  meta.className = "game-meta";
+  meta.textContent = [g.date, g.server ?? "Local", `${g.size} × ${g.size}`, `${g.moves} moves`].filter(Boolean).join(" · ");
+  const text = document.createElement("span");
+  text.className = "game-text";
+  text.append(title, meta);
+  const result = document.createElement("span");
+  result.className = "game-result";
+  result.textContent = g.result ?? "";
+  b.append(text, result);
+  if (g.reviewed) {
+    const tag = document.createElement("span");
+    tag.className = "game-tag";
+    tag.textContent = "Reviewed";
+    b.append(tag);
+  }
+  b.addEventListener("click", () => {
+    dialog("games-dialog").close("opened");
+    runView(() => api.openLibraryGame(g.file));
+  });
+  return b;
+}
+
+dialog("games-dialog").addEventListener("close", (e) => {
+  if ((e.target as HTMLDialogElement).returnValue === "file") actions.open();
+});
+
+// ---------- help ----------
+
+async function copyDiagnostics() {
+  let text = "";
+  try {
+    text = await api.diagnostics();
+    await navigator.clipboard.writeText(text);
+    notify("Diagnostics copied. Paste them into a GitHub issue");
+  } catch {
+    // The clipboard can refuse; show the text to copy by hand.
+    const area = $<HTMLTextAreaElement>("#diagnostics-text");
+    area.value = text || "Couldn't collect diagnostics.";
+    dialog("diagnostics-dialog").showModal();
+    area.select();
+  }
+}
+
+// Clicked directly, so the clipboard accepts it even where the first try was refused.
+$("#diagnostics-copy").addEventListener("click", () => {
+  const area = $<HTMLTextAreaElement>("#diagnostics-text");
+  navigator.clipboard.writeText(area.value).then(
+    () => {
+      dialog("diagnostics-dialog").close();
+      notify("Diagnostics copied. Paste them into a GitHub issue");
+    },
+    () => {
+      area.select();
+      notify("Press ⌘C to copy the selected text");
+    },
+  );
+});
+
+async function checkForUpdate() {
+  const u = await api.checkUpdate().catch(() => null);
+  if (!u) return;
+  const b = $<HTMLButtonElement>("#update");
+  b.textContent = `Tengen ${u.version} is out`;
+  b.hidden = false;
+  b.onclick = () => run(() => api.openRelease(u.url));
+}
 
 dialog("ogs-dialog").addEventListener("close", async (e) => {
   const choice = (e.target as HTMLDialogElement).returnValue;
@@ -433,6 +664,7 @@ const SIGN_UP: Record<ServerName, string> = {
 
 async function openOnline() {
   await run(api.serverStatus, showServers);
+window.setTimeout(checkForUpdate, 3000);
   syncOnline();
   dialog("online-dialog").showModal();
 }
@@ -531,7 +763,8 @@ function syncLookDialog() {
     texture: (v) => v === settings.texture,
     theme: (v) => v === settings.theme,
     stones: (v) => v === settings.stones,
-    toggles: (v) => (v === "coords" ? settings.coords : v === "zen" ? settings.zen : settings.sound),
+    toggles: (v) =>
+      ({ coords: settings.coords, zen: settings.zen, sound: settings.sound, confirm: settings.confirm, tick: settings.tick })[v] ?? false,
   };
   document.querySelectorAll<HTMLElement>("#look-dialog [data-setting]").forEach((group) => {
     group.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
@@ -555,9 +788,12 @@ document.querySelectorAll<HTMLElement>("#look-dialog [data-setting]").forEach((g
     if (kind === "toggles" && b.value === "coords") settings.coords = !settings.coords;
     if (kind === "toggles" && b.value === "sound") settings.sound = !settings.sound;
     if (kind === "toggles" && b.value === "zen") setZen(!settings.zen);
+    if (kind === "toggles" && b.value === "confirm") settings.confirm = !settings.confirm;
+    if (kind === "toggles" && b.value === "tick") settings.tick = !settings.tick;
     saveSettings(settings);
     board.setLook(settings);
     fitBoard();
+    if (view) show(view);
     syncLookDialog();
   });
 });
@@ -581,6 +817,7 @@ window.addEventListener("keydown", (e) => {
     n: actions.new,
     d: actions.ogs,
     l: actions.online,
+    y: actions.games,
   };
   if (!cmd && (e.key === "e" || e.key === "E")) return void actions.estimate();
   if (!cmd && (e.key === "r" || e.key === "R")) return void actions.review();
@@ -591,6 +828,7 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Escape") {
+    if (board.clearPending()) return;
     if (lineTurn !== null) {
       lineTurn = null;
       board.setLine(null);
@@ -616,7 +854,9 @@ onEvents({
   progress: (p) => {
     if (p.stage === "download") {
       const mb = (n: number) => Math.round(n / 1e6);
-      $("#katago-progress").textContent = p.total ? `${mb(p.done)} of ${mb(p.total)} MB` : `${mb(p.done)} MB`;
+      const text = p.total ? `${mb(p.done)} of ${mb(p.total)} MB` : `${mb(p.done)} MB`;
+      $("#katago-progress").textContent = text;
+      $("#human-progress").textContent = text;
     }
     panel.showProgress(p);
   },
@@ -627,3 +867,4 @@ runView(api.current).then(() => {
   if (sample) setClock(sample);
 });
 run(api.serverStatus, showServers);
+window.setTimeout(checkForUpdate, 3000);

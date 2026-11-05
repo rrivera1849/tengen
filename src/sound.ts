@@ -27,3 +27,23 @@ export function click() {
     // No audio device: stay silent.
   }
 }
+
+/** A soft, short tick for the last seconds on your clock. */
+export function tick() {
+  try {
+    ctx ??= new AudioContext();
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = 1320;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.12, t + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.08);
+  } catch {
+    // No audio device: stay silent.
+  }
+}
