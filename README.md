@@ -16,6 +16,8 @@ Tengen isn't signed with an Apple developer certificate, so the first time you o
 2. Open **System Settings → Privacy & Security**, scroll down, and choose **Open Anyway** next to Tengen.
 3. Confirm with your password or Touch ID. From then on Tengen opens normally.
 
+If macOS instead says Tengen "is damaged and can't be opened" (version 1.0.0 did this), open Terminal and run `xattr -cr /Applications/Tengen.app`, then open Tengen again.
+
 Tengen tells you, with a small link beside its name, when a newer release is out.
 
 ## What it does

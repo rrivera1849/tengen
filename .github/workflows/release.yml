@@ -83,6 +83,14 @@ jobs:
         # Unsigned: the README explains opening it the first time.
         run: npm run tauri build -- --bundles app,dmg
 
+      - name: Check the app is signed
+        # Without at least an ad-hoc signature, macOS calls a downloaded app
+        # "damaged" and offers no way to open it.
+        run: |
+          app=$(ls -d target/release/bundle/macos/*.app src-tauri/target/release/bundle/macos/*.app 2>/dev/null | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv "$app" 2>&1 | grep -E "Signature|Identifier"
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
