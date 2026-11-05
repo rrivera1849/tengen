@@ -1,22 +1,27 @@
 import "@fontsource-variable/fraunces/opsz.css";
 import "@fontsource-variable/fraunces/opsz-italic.css";
-import { api, onEvents, previewClock, type Color, type ServerName, type ServerStatus, type Speed, type View } from "./api";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { api, inApp, onEvents, previewClock, type Color, type ServerName, type ServerStatus, type Speed, type View } from "./api";
 import { BoardView, type Look, type StoneStyle, type Texture } from "./board";
 import { setClock } from "./clock";
 import * as panel from "./review";
 import { click } from "./sound";
 
+type Theme = "system" | "light" | "dark";
+
 interface Settings extends Look {
   sound: boolean;
   /** Only the board and the clocks. */
   zen: boolean;
+  /** Day, night, or whatever the Mac is set to. */
+  theme: Theme;
   matchSize: number;
   matchSpeed: Speed;
   matchServer: ServerName;
 }
 
 const DEFAULTS: Settings = {
-  texture: "kaya", stones: "shell", coords: false, sound: true, zen: false, matchSize: 19, matchSpeed: "rapid", matchServer: "OGS",
+  texture: "kaya", stones: "shell", coords: false, sound: true, zen: false, theme: "system", matchSize: 19, matchSpeed: "rapid", matchServer: "OGS",
 };
 
 function loadSettings(): Settings {
@@ -74,6 +79,18 @@ function setZen(on: boolean) {
   document.body.classList.toggle("zen", on);
 }
 document.body.classList.toggle("zen", settings.zen);
+
+/** Day or night for the page, and for the window's title bar to match. */
+function applyTheme(theme: Theme) {
+  if (theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  if (inApp) {
+    getCurrentWindow()
+      .setTheme(theme === "system" ? null : theme)
+      .catch(() => {});
+  }
+}
+applyTheme(settings.theme);
 
 // ---------- rendering ----------
 
@@ -512,6 +529,7 @@ dialog("online-dialog").addEventListener("close", (e) => {
 function syncLookDialog() {
   const pressed: Record<string, (v: string) => boolean> = {
     texture: (v) => v === settings.texture,
+    theme: (v) => v === settings.theme,
     stones: (v) => v === settings.stones,
     toggles: (v) => (v === "coords" ? settings.coords : v === "zen" ? settings.zen : settings.sound),
   };
@@ -529,6 +547,10 @@ document.querySelectorAll<HTMLElement>("#look-dialog [data-setting]").forEach((g
     e.preventDefault();
     const kind = group.dataset.setting;
     if (kind === "texture") settings.texture = b.value as Texture;
+    if (kind === "theme") {
+      settings.theme = b.value as Theme;
+      applyTheme(settings.theme);
+    }
     if (kind === "stones") settings.stones = b.value as StoneStyle;
     if (kind === "toggles" && b.value === "coords") settings.coords = !settings.coords;
     if (kind === "toggles" && b.value === "sound") settings.sound = !settings.sound;

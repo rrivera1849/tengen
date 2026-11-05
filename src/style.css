@@ -1,5 +1,5 @@
-/* Lamplight: the board lit in a quiet room. Night follows a dark Mac,
-   day (a pale room in window light) follows a light one. */
+/* Lamplight: the board lit in a quiet room. Night is dark; day is a pale
+   room in window light. Board settings pick one, or follow the Mac. */
 
 :root {
   --room: #110f0d;
@@ -39,8 +39,44 @@
   color-scheme: dark;
 }
 
+/* Day: chosen in Board settings, or following a light Mac. */
+:root[data-theme="light"] {
+  --room: #e7e1d6;
+  --glow: rgba(255, 255, 255, 0.6);
+  --glow-soft: rgba(255, 250, 240, 0.25);
+  --name: #2a2219;
+  --text: #3a3024;
+  --soft: #4f4434;
+  --muted: #655a4b;
+  --idle: #7d7262;
+  --clock: #221b12;
+  --brass: #7f5615;
+  --brass-bright: #6f4a10;
+  --brass-glow: rgba(160, 110, 30, 0.35);
+  --capsule: rgba(255, 251, 244, 0.9);
+  --capsule-line: rgba(60, 40, 15, 0.12);
+  --hover: rgba(60, 40, 15, 0.07);
+  --rule: rgba(60, 40, 15, 0.14);
+  --panel: rgba(255, 251, 244, 0.88);
+  --dialog: #fbf7ef;
+  --field: #f3eee4;
+  --board-shadow: rgba(70, 45, 15, 0.38);
+  --capsule-shadow: rgba(70, 45, 15, 0.35);
+  --dot-ring: rgba(60, 40, 15, 0.25);
+  --warm: #b4580f;
+  --warm-soft: #9a5a22;
+  --warm-glow: rgba(200, 110, 30, 0.2);
+  --mine: #c96b16;
+  --theirs: #3b72ad;
+  --graph-bg: rgba(60, 40, 15, 0.06);
+  --graph-black: #1b1712;
+  --graph-white: #fffdf8;
+  --solid-text: #fffaf0;
+  color-scheme: light;
+}
+
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     --room: #e7e1d6;
     --glow: rgba(255, 255, 255, 0.6);
     --glow-soft: rgba(255, 250, 240, 0.25);
