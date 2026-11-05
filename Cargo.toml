@@ -6,7 +6,7 @@ members = ["crates/tengen-core", "crates/tengen-ogs", "crates/tengen-fox", "crat
 default-members = ["crates/tengen-core", "crates/tengen-ogs", "crates/tengen-fox", "crates/tengen-kgs", "crates/tengen-igs", "crates/tengen-ai"]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/rrivera1849/tengen"

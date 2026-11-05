@@ -5,4 +5,4 @@
 # Tengen's OGS app registration. It identifies the app, not a person: everyone
 # signs in with their own OGS account through the browser. OGS public clients
 # have no secret, so this is safe to publish.
-ogs_client_id = ""
+ogs_client_id = "7ableiAhA390bKpHrwcpc6YXTEAUPqggKVApWyYG"
