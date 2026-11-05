@@ -420,7 +420,7 @@ fn clear_claude_key(app: AppHandle) -> ai::AiStatus {
 }
 
 #[tauri::command]
-fn list_maxims(app: AppHandle) -> Vec<(String, Vec<String>)> {
+fn list_maxims(app: AppHandle) -> Result<Vec<(String, Vec<String>)>, String> {
     ai::maxims(&app)
 }
 

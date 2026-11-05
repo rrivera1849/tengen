@@ -47,6 +47,10 @@ impl Store {
         self.entries.extend(new);
     }
 
+    pub fn has_game(&self, game: &str) -> bool {
+        self.entries.iter().any(|e| e.game == game)
+    }
+
     /// The most recent maxims from other games, newest first.
     pub fn recent(&self, except_game: &str, n: usize) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
@@ -111,6 +115,14 @@ mod tests {
             kind: kind.into(),
             maxim: maxim.into(),
         }
+    }
+
+    #[test]
+    fn knows_which_games_it_has() {
+        let mut s = Store::default();
+        assert!(!s.has_game("g1"));
+        s.record("g1", vec![e("g1", "Tempo", "Tenuki when it's small")]);
+        assert!(s.has_game("g1") && !s.has_game("g2"));
     }
 
     #[test]

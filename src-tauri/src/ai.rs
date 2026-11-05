@@ -203,6 +203,9 @@ pub async fn review(app: &AppHandle, you: Color) -> Result<ReviewView, String> {
         let needs_prose = cached.note.is_some() && keychain::load_claude_key().is_some();
         if !needs_prose {
             attach_comments(app, &fingerprint, &cached);
+            // A saved review still counts toward your maxims, in case they
+            // were never recorded (or the maxims file was lost since).
+            remember_maxims(app, &cached, &today());
             return Ok(cached);
         }
     }
@@ -252,22 +255,12 @@ pub async fn review(app: &AppHandle, you: Color) -> Result<ReviewView, String> {
     };
 
     // Keep the maxims for next time.
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let entries = views
-        .iter()
-        .filter(|v| v.side == Side::You)
-        .filter_map(|v| {
-            Some(maxims::Entry {
-                date: today.clone(),
-                game: fingerprint.clone(),
-                kind: v.kind.clone(),
-                maxim: v.lesson.as_ref()?.maxim.clone(),
-            })
-        })
-        .collect::<Vec<_>>();
+    let entries = maxim_entries(&fingerprint, &views, &today());
     if !entries.is_empty() {
         store.record(&fingerprint, entries);
-        let _ = store.save();
+        if let Err(e) = store.save() {
+            crate::notify(app, format!("Couldn't save your maxims: {e}"));
+        }
     }
 
     let note = key
@@ -395,6 +388,78 @@ fn color_key(c: Color) -> &'static str {
     }
 }
 
-pub fn maxims(app: &AppHandle) -> Vec<(String, Vec<String>)> {
-    maxims::Store::load(&data_dir(app, "maxims.json")).by_kind()
+fn today() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// Your maxims from a review's lessons (your opponent's are left out).
+fn maxim_entries(game: &str, lessons: &[LessonView], date: &str) -> Vec<maxims::Entry> {
+    lessons
+        .iter()
+        .filter(|v| v.side == Side::You)
+        .filter_map(|v| {
+            let maxim = v.lesson.as_ref()?.maxim.trim().to_string();
+            (!maxim.is_empty()).then(|| maxims::Entry {
+                date: date.to_string(),
+                game: game.to_string(),
+                kind: v.kind.clone(),
+                maxim,
+            })
+        })
+        .collect()
+}
+
+/// Records a review's maxims unless the store already has that game.
+fn remember_maxims(app: &AppHandle, view: &ReviewView, date: &str) {
+    let path = data_dir(app, "maxims.json");
+    let mut store = maxims::Store::load(&path);
+    if store.has_game(&view.fingerprint) {
+        return;
+    }
+    let entries = maxim_entries(&view.fingerprint, &view.lessons, date);
+    if !entries.is_empty() {
+        store.record(&view.fingerprint, entries);
+        let _ = store.save();
+    }
+}
+
+/// Every maxim, grouped by kind. Reviews saved on disk whose maxims were
+/// never recorded are picked up here, so none go missing.
+pub fn maxims(app: &AppHandle) -> Result<Vec<(String, Vec<String>)>, String> {
+    let path = data_dir(app, "maxims.json");
+    let mut store = maxims::Store::load(&path);
+    let mut changed = false;
+    if let Ok(dir) = std::fs::read_dir(data_dir(app, "reviews")) {
+        for entry in dir.flatten() {
+            let Ok(text) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let Ok(view) = serde_json::from_str::<ReviewView>(&text) else {
+                continue;
+            };
+            if store.has_game(&view.fingerprint) {
+                continue;
+            }
+            let date = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .map(|t| {
+                    chrono::DateTime::<chrono::Local>::from(t)
+                        .format("%Y-%m-%d")
+                        .to_string()
+                })
+                .unwrap_or_else(|_| today());
+            let entries = maxim_entries(&view.fingerprint, &view.lessons, &date);
+            if !entries.is_empty() {
+                store.record(&view.fingerprint, entries);
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        store
+            .save()
+            .map_err(|e| format!("Couldn't save your maxims: {e}"))?;
+    }
+    Ok(store.by_kind())
 }

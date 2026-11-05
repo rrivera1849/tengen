@@ -210,7 +210,10 @@ async function editKey() {
 }
 
 async function showMaxims() {
-  const groups = await api.maxims().catch(() => []);
+  const groups = await api.maxims().catch((e) => {
+    notify(explain(e));
+    return [] as [string, string[]][];
+  });
   const list = $("#maxims-list");
   list.replaceChildren();
   if (!groups.length) {
