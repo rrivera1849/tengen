@@ -21,9 +21,9 @@ use tokio::net::TcpListener;
 pub const CALLBACK_PORT: u16 = 47613;
 pub const REDIRECT_URI: &str = "http://127.0.0.1:47613/oauth/callback";
 
-/// The public client id of your OGS app registration, found at build time
-/// (see `build.rs`): from `TENGEN_OGS_CLIENT_ID`, or from `tengen.local.toml`
-/// at the repository root, which git ignores.
+/// The public client id of Tengen's OGS app registration, found at build
+/// time (see `build.rs`): `TENGEN_OGS_CLIENT_ID`, then `tengen.local.toml`,
+/// then the shared `tengen.toml` at the repository root.
 pub fn client_id() -> Option<&'static str> {
     option_env!("TENGEN_OGS_CLIENT_ID_RESOLVED").filter(|id| !id.is_empty())
 }

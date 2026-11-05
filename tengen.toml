@@ -1,0 +1,8 @@
+# Tengen's build settings, shared by everyone who builds it. To use different
+# values in your own builds, put them in tengen.local.toml (which git ignores;
+# copy tengen.local.example.toml to start).
+
+# Tengen's OGS app registration. It identifies the app, not a person: everyone
+# signs in with their own OGS account through the browser. OGS public clients
+# have no secret, so this is safe to publish.
+ogs_client_id = ""

@@ -35,11 +35,15 @@ npm run tauri build    # makes Tengen.app and a .dmg in src-tauri/target/release
 
 ## Signing in to OGS
 
-OGS signs apps in through the browser (OAuth2 with PKCE), so Tengen never sees your password. Tengen needs an OGS app registration once:
+Choose **Play online** (⌘L) and **Sign in with OGS**. Your browser opens OGS's sign-in page and hands control back to Tengen when you approve, so Tengen never sees your password. The sign-in is kept in the macOS Keychain and renewed automatically; it lasts 30 days between uses.
+
+### Building with your own OGS registration
+
+Tengen's builds use Tengen's OGS app registration, whose client ID is in `tengen.toml`. It identifies the app, not a person: everyone signs in with their own account, and OGS public clients have no secret. To use a registration of your own (for a fork, say):
 
 1. Sign in at online-go.com and open [online-go.com/oauth2/applications](https://online-go.com/oauth2/applications/).
 2. Register a new application:
-   - **Name:** Tengen
+   - **Name:** what OGS should show people when they sign in
    - **Client type:** Public
    - **Authorization grant type:** Authorization code
    - **Redirect URIs:** `http://127.0.0.1:47613/oauth/callback` (exactly this)
@@ -49,9 +53,7 @@ OGS signs apps in through the browser (OAuth2 with PKCE), so Tengen never sees y
    ogs_client_id = "paste-the-client-id-here"
    ```
 
-   Rebuild after changing it. You can also set `TENGEN_OGS_CLIENT_ID=…` when building instead; the environment variable wins.
-
-Then choose **Play online** (⌘L) and **Sign in with OGS**. Your browser opens OGS's sign-in page and hands control back to Tengen when you approve. The sign-in is kept in the macOS Keychain and renewed automatically; it lasts 30 days between uses.
+   Rebuild after changing it. You can also set `TENGEN_OGS_CLIENT_ID=…` when building; the environment variable wins over both files.
 
 ## Playing on KGS and Pandanet
 
